@@ -1,13 +1,6 @@
 package frc.robot.subsystems;
 
 
-import static edu.wpi.first.units.Units.Amps;
-import static edu.wpi.first.units.Units.DegreesPerSecond;
-import static edu.wpi.first.units.Units.Inches;
-import static edu.wpi.first.units.Units.MetersPerSecond;
-import static edu.wpi.first.units.Units.Radians;
-import static edu.wpi.first.units.Units.RadiansPerSecond;
-
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.Pigeon2;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
@@ -19,13 +12,21 @@ import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.Distance;
 import edu.wpi.first.units.measure.LinearVelocity;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
+
+import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
+import org.ironmaple.simulation.opponentsim.OpponentManager;
 import yams.gearing.GearBox;
 import yams.gearing.MechanismGearing;
 import yams.mechanisms.config.SwerveDriveConfig;
@@ -37,8 +38,13 @@ import yams.motorcontrollers.SmartMotorController;
 import yams.motorcontrollers.SmartMotorControllerConfig;
 import yams.motorcontrollers.local.SparkWrapper;
 
+import static edu.wpi.first.units.Units.*;
+import static edu.wpi.first.units.Units.Meters;
+
 public class SwerveSubsystem extends SubsystemBase
 {
+  private final double OBSTACLE_BUFFER = 0.3;
+  private final List<OpponentManager.ObstacleRect> obstacles = new ArrayList<>();
 
   private final SwerveDrive drive;
   private final Field2d     field = new Field2d();
@@ -166,10 +172,60 @@ public class SwerveSubsystem extends SubsystemBase
     return run(() -> drive.setRobotRelativeChassisSpeeds(speeds));
   }
 
-  public Command driveToPose(Pose2d pose)
-  {
-    return drive.driveToPose(pose);
-  }
+    /**
+     * Advanced pathfinding with obstacle avoidance using potential fields
+     */
+    public Command pathfindCommand(Pose2d targetPose, Distance tolerance) {
+        return Commands.run(() -> {
+            Pose2d robotPose = drive.getPose();
+            double rX = robotPose.getX(), rY = robotPose.getY();
+            double tX = targetPose.getX(), tY = targetPose.getY();
+            double distTolerance = tolerance.in(Meters);
+
+            // Attraction force toward target
+            double attractX = tX - rX;
+            double attractY = tY - rY;
+            double attractDist = Math.hypot(attractX, attractY);
+            double attractWeight = 1.0;
+
+            if (attractDist > 0.01) {
+                attractX = (attractX / attractDist) * attractWeight;
+                attractY = (attractY / attractDist) * attractWeight;
+            } else {
+                attractX = attractY = 0;
+            }
+
+            // Repulsion forces from obstacles
+            double repelX = 0, repelY = 0;
+            for (OpponentManager.ObstacleRect obs : obstacles) {
+                double obsDist = Math.hypot(rX - obs.centerX, rY - obs.centerY);
+                double repelRadius = Math.sqrt(obs.width * obs.width + obs.height * obs.height) + OBSTACLE_BUFFER;
+
+                if (obsDist < repelRadius && obsDist > 0.01) {
+                    double repelStrength = repelRadius / (obsDist + 0.1);
+                    double angle = Math.atan2(rY - obs.centerY, rX - obs.centerX);
+                    repelX += Math.cos(angle) * repelStrength;
+                    repelY += Math.sin(angle) * repelStrength;
+                }
+            }
+
+            // Combine forces with obstacle weight higher to ensure avoidance
+            double totalX = attractX + repelX * 0.8;
+            double totalY = attractY + repelY * 0.8;
+            double totalMag = Math.hypot(totalX, totalY);
+
+            if (totalMag > 0.01) {
+                double maxVel = maximumChassisSpeedsLinearVelocity.in(MetersPerSecond);
+                double vx = (totalX / totalMag) * maxVel;
+                double vy = (totalY / totalMag) * maxVel;
+                double omega = targetPose.getRotation().minus(robotPose.getRotation()).getRadians() * 2;
+                drive.drive(() -> new ChassisSpeeds(vx, vy, omega));
+            } else {
+                drive.drive(ChassisSpeeds::new);
+            }
+        }, this).until(() -> drive.getPose().getTranslation()
+                .getDistance(targetPose.getTranslation()) <= tolerance.in(Meters));
+    }
 
   public Command driveRobotRelative(Supplier<ChassisSpeeds> speedsSupplier)
   {
@@ -179,6 +235,11 @@ public class SwerveSubsystem extends SubsystemBase
   public Command lock()
   {
     return run(drive::lockPose);
+  }
+
+  public Command resetRobotPose() {
+        return Commands.runOnce(() ->
+        drive.resetOdometry(new Pose2d(4, 4, Rotation2d.kZero)));
   }
 
   @Override
