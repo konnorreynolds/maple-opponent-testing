@@ -1,42 +1,48 @@
 package org.ironmaple.simulation.opponentsim;
 
+import edu.wpi.first.math.Pair;
 import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.wpilibj.DriverStation;
-import org.ironmaple.simulation.gamepieces.GamePiece;
+import org.ironmaple.utils.FieldMirroringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 public class OpponentManager {
-    protected Optional<List<SmartOpponent>> redOpponents;
-    protected Optional<List<SmartOpponent>> blueOpponents;
+    protected List<Pair<Pose2d, Integer>> robotTargets = new ArrayList<>();
+    protected List<Pair<Integer, Pose2d>> blueStartingPositions = new ArrayList<>();
+    protected List<Pair<Integer, Pose2d>> redStartingPositions = new ArrayList<>();
+    protected List<SmartOpponent> redOpponents = new ArrayList<>();
+    protected List<SmartOpponent> blueOpponents = new ArrayList<>();
+
 
     public void registerOpponent(SmartOpponent opponent, DriverStation.Alliance alliance) {
-        if (alliance == DriverStation.Alliance.Blue) blueOpponents.get().add(opponent);
-        else redOpponents.get().add(opponent);
+        if (alliance == DriverStation.Alliance.Blue) blueOpponents.add(opponent);
+        else redOpponents.add(opponent);
     }
 
     public List<SmartOpponent> getOpponents(DriverStation.Alliance alliance) {
-        return alliance.equals(DriverStation.Alliance.Blue) ? blueOpponents.get() : redOpponents.get();
+        return alliance.equals(DriverStation.Alliance.Blue) ? blueOpponents : redOpponents;
     }
 
     public List<SmartOpponent> getOpponents() {
-        List<SmartOpponent> allOpponents = new ArrayList<>(blueOpponents.get());
-        allOpponents.addAll(redOpponents.get());
+        List<SmartOpponent> allOpponents = new ArrayList<>(blueOpponents);
+        allOpponents.addAll(redOpponents);
         return allOpponents;
     }
 
     public List<Pose2d> getOpponentTargets(DriverStation.Alliance alliance) {
         List<Pose2d> targets = new ArrayList<>();
         if (alliance == DriverStation.Alliance.Blue) {
-            for (SmartOpponent blueOpponent : blueOpponents.get()) {
-                targets.add(blueOpponent.getTarget());
+            for (SmartOpponent blueOpponent : blueOpponents) {
+                targets.add(blueOpponent.getTargetTask().getFirst());
             }
         } else {
-            for (SmartOpponent redOpponent : redOpponents.get()) {
-                targets.add(redOpponent.getTarget());
+            for (SmartOpponent redOpponent : redOpponents) {
+                targets.add(redOpponent.getTargetTask().getFirst());
             }
         }
         return targets;
@@ -46,7 +52,7 @@ public class OpponentManager {
         List<SmartOpponent> allOpponents = getOpponents();
         List<Pose2d> targets = new ArrayList<>();
         for (SmartOpponent opponent : allOpponents) {
-            targets.add(opponent.getTarget());
+            targets.add(opponent.getTargetTask().getFirst());
         }
         return targets;
     }
@@ -54,11 +60,11 @@ public class OpponentManager {
     public List<Pose2d> getOpponentPoses(DriverStation.Alliance alliance) {
         List<Pose2d> poses = new ArrayList<>();
         if (alliance == DriverStation.Alliance.Blue) {
-            for (SmartOpponent blueOpponent : blueOpponents.get()) {
+            for (SmartOpponent blueOpponent : blueOpponents) {
                 poses.add(blueOpponent.getPose());
             }
         } else {
-            for (SmartOpponent redOpponent : redOpponents.get()) {
+            for (SmartOpponent redOpponent : redOpponents) {
                 poses.add(redOpponent.getPose());
             }
         }
@@ -75,56 +81,83 @@ public class OpponentManager {
     }
 
     /**
-     * Used by the opponent bot, season-specific.
+     * Used by the opponent bot, season-specific. id 1-3, id is the pose ID
      */
     protected Pose2d getStartingPose(DriverStation.Alliance alliance, int id) {
-        return new Pose2d();
-    }
-
-    /**
-     * Used by the opponent bot, season-specific.
-     */
-    protected Pose2d getQueeningPose(DriverStation.Alliance alliance, int id) {
-        return new Pose2d();
-    }
-
-    /**
-     * Used by the opponent bot, season-specific.
-     */
-    protected Pose2d getNextScoreTarget(DriverStation.Alliance alliance) {
-        return new Pose2d();
-    }
-
-    // idk what to do with this yet
-    protected String getNextScoreTargetName(DriverStation.Alliance alliance, int id) {
-        return "";
-    }
-
-    /**
-     * Used by the opponent bot, season-specific.
-     */
-    protected Pose2d getNextCollectTarget(DriverStation.Alliance alliance) {
-        return new Pose2d();
-    }
-
-    // Simple obstacle rectangle class
-    public static class ObstacleRect {
-        public double x, y, width, height, centerX, centerY;
-
-        public ObstacleRect(double x, double y, double width, double height) {
-            this.x = x;
-            this.y = y;
-            this.width = width;
-            this.height = height;
-            this.centerX = x + width / 2;
-            this.centerY = y + height / 2;
+        if (alliance == DriverStation.Alliance.Blue) {
+            for (Pair<Integer, Pose2d> pair : blueStartingPositions) {
+                if (pair.getFirst() == id) return pair.getSecond();
+            } // If not found, add it to the list
+            blueStartingPositions.add(new Pair<>(id, ifShouldFlip(alliance, ManagerConstants.STARTING_POSITIONS[blueStartingPositions.size()])));
+        } else {
+            for (Pair<Integer, Pose2d> pair : redStartingPositions) {
+                if (pair.getFirst() == id) return pair.getSecond();
+            } // If not found, add it to the list
+            redStartingPositions.add(new Pair<>(id, ifShouldFlip(alliance, ManagerConstants.STARTING_POSITIONS[redStartingPositions.size()])));
         }
+        return getStartingPose(alliance, id);
+    }
 
-        public boolean intersectsLine(double sx, double sy, double ex, double ey, double buffer) {
-            double expandedX = x - buffer, expandedY = y - buffer;
-            double expandedW = width + 2 * buffer, expandedH = height + 2 * buffer;
-            return !(ey < expandedY || sy > expandedY + expandedH ||
-                    ex < expandedX || sx > expandedX + expandedW);
+    /**
+     * Used by the opponent bot, season-specific. id 1-6, id is the pose ID
+     */
+    public Pose2d getQueeningPose(int id) {
+        return ManagerConstants.ROBOT_QUEENING_POSITIONS[id - 1];
+    }
+
+    /**
+     * Used by the opponent bot, season-specific.
+     */
+    public Pair<Pose2d, String> getNextScoreTarget(DriverStation.Alliance alliance, int id) {
+        return Pair.of(new Pose2d(), "Task");
+    }
+
+    /**
+     * Used by the opponent bot, season-specific.
+     */
+    public Pair<Pose2d, String> getNextCollectTarget(DriverStation.Alliance alliance, int id) {
+        return Pair.of(new Pose2d(), "Task");
+    }
+
+    public List<Pair<Translation2d, Translation2d>> getObstacles() {
+        List<SmartOpponent> robots = getOpponents();
+        List<Pair<Translation2d, Translation2d>> obs = new ArrayList<>(robots.size() + 1);
+        Translation2d offset = new Translation2d(.5, .5);
+        for (SmartOpponent robot : robots) {
+            obs.add(new Pair<>(
+                    robot.getPose().getTranslation().plus(offset),
+                    robot.getPose().getTranslation().minus(offset)));
+        }
+        return obs;
+    }
+
+    protected static class ManagerConstants {
+        protected static final Pose2d[] ROBOT_QUEENING_POSITIONS = new Pose2d[] {
+                        new Pose2d(-6, 0, new Rotation2d()),
+                        new Pose2d(-5, 0, new Rotation2d()),
+                        new Pose2d(-4, 0, new Rotation2d()),
+                        new Pose2d(-3, 0, new Rotation2d()),
+                        new Pose2d(-2, 0, new Rotation2d())
+                };
+        protected static final Pose2d[] STARTING_POSITIONS = new Pose2d[]
+                {
+                        new Pose2d(15, 6, Rotation2d.fromDegrees(180)),
+                        new Pose2d(15, 4, Rotation2d.fromDegrees(180)),
+                        new Pose2d(15, 2, Rotation2d.fromDegrees(180))
+                };
+    }
+
+    /**
+     * @param pose
+     * @return
+     */
+    public Pose2d ifShouldFlip(DriverStation.Alliance alliance, Pose2d pose) {
+        if (alliance == DriverStation.Alliance.Red) {
+            return pose;
+        } else {
+            return new Pose2d(
+                    FieldMirroringUtils.flip(pose.getTranslation()),
+                    FieldMirroringUtils.flip(pose.getRotation()));
         }
     }
 

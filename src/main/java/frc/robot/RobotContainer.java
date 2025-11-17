@@ -5,12 +5,19 @@
 package frc.robot;
 
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.StructArrayPublisher;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import frc.robot.subsystems.SwerveSubsystem;
+import org.ironmaple.simulation.SimulatedArena;
+import org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim.KitBot;
+import org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim.ReefscapeOpponentManager;
 import yams.mechanisms.swerve.utility.SwerveInputStream;
 
 import static edu.wpi.first.units.Units.Inches;
@@ -22,13 +29,20 @@ public class RobotContainer {
 
   public RobotContainer() {
     configureBindings();
+
+
   }
 
   private void configureBindings() {
+      SimulatedArena.getInstance().resetFieldForAuto();
+      ReefscapeOpponentManager manager = new ReefscapeOpponentManager();
+      new KitBot(manager, DriverStation.Alliance.Blue, 1);
+      new KitBot(manager, DriverStation.Alliance.Red, 2);
+
       // Sets up the input stream for the swerve drive
       SwerveInputStream stream = drive.getChassisSpeedsSupplier(
-              () -> xboxController.getLeftX() * -1,
-              () -> xboxController.getLeftY() * -1,
+              xboxController::getLeftY,
+              xboxController::getLeftX,
               () -> xboxController.getRightX() * -1);
       // Sets the default command for the swerve drive
       drive.setDefaultCommand(drive.driveRobotRelative(stream));
@@ -38,7 +52,7 @@ public class RobotContainer {
 
       xboxController.back().onTrue(drive.resetRobotPose());
       // Binds a button to run the pathfind command
-      xboxController.a().onTrue(drive.pathfindCommand(new Pose2d( new Translation2d(4, 4), Rotation2d.kZero), Inches.of(1)));
+      xboxController.a().whileTrue(drive.driveToPose(new Pose2d(new Translation2d(3, 3), Rotation2d.kZero)));
 
   }
 
