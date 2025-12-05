@@ -4,10 +4,15 @@
 
 package frc.robot;
 
+import com.pathplanner.lib.commands.PathfindThenFollowPath;
+import com.pathplanner.lib.commands.PathfindingCommand;
+import com.pathplanner.lib.pathfinding.Pathfinder;
+import com.pathplanner.lib.pathfinding.Pathfinding;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StructArrayPublisher;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -16,11 +21,13 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import frc.robot.subsystems.SwerveSubsystem;
 import org.ironmaple.simulation.SimulatedArena;
+import org.ironmaple.simulation.opponentsim.pathfinding.MapleADStar;
+import org.ironmaple.simulation.seasonspecific.reefscape2025.Arena2025Reefscape;
 import org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim.KitBot;
 import org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim.ReefscapeOpponentManager;
 import yams.mechanisms.swerve.utility.SwerveInputStream;
 
-import static edu.wpi.first.units.Units.Inches;
+import static edu.wpi.first.units.Units.*;
 
 public class RobotContainer {
     // The robot's subsystems and commands are defined here...'
@@ -29,14 +36,14 @@ public class RobotContainer {
 
   public RobotContainer() {
     configureBindings();
-
-
   }
 
   private void configureBindings() {
-      SimulatedArena.getInstance().resetFieldForAuto();
+      Arena2025Reefscape.getInstance().resetFieldForAuto();
+      Arena2025Reefscape.getInstance().enableBreakdownPublishing();
       ReefscapeOpponentManager manager = new ReefscapeOpponentManager();
-      new KitBot(manager, DriverStation.Alliance.Blue, 1);
+      new KitBot(manager, DriverStation.Alliance.Blue, 1)
+              .withJoystick(xboxController);
       new KitBot(manager, DriverStation.Alliance.Red, 2);
 
       // Sets up the input stream for the swerve drive

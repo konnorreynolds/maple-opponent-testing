@@ -1,10 +1,14 @@
 package org.ironmaple.simulation.opponentsim;
 
+import com.pathplanner.lib.commands.PathfindingCommand;
+import com.pathplanner.lib.pathfinding.Pathfinding;
 import edu.wpi.first.math.Pair;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import org.ironmaple.simulation.opponentsim.pathfinding.MapleADStar;
 import org.ironmaple.utils.FieldMirroringUtils;
 
 import java.util.ArrayList;
@@ -18,6 +22,14 @@ public class OpponentManager {
     protected List<SmartOpponent> redOpponents = new ArrayList<>();
     protected List<SmartOpponent> blueOpponents = new ArrayList<>();
 
+    /**
+     * MapleSim Opponent sim currently relies on Pathplanner with a modified pathfinder.
+     * This is to be changed soon. ^TM
+
+     */
+    public OpponentManager() {
+        PathfindingCommand.warmupCommand().schedule();
+    }
 
     public void registerOpponent(SmartOpponent opponent, DriverStation.Alliance alliance) {
         if (alliance == DriverStation.Alliance.Blue) blueOpponents.add(opponent);
@@ -119,27 +131,35 @@ public class OpponentManager {
         return Pair.of(new Pose2d(), "Task");
     }
 
-    public List<Pair<Translation2d, Translation2d>> getObstacles() {
+    /**
+     *
+     * @param id current robot ID, used to remove self as an obstacle.
+     * @return
+     */
+    public List<Pair<Translation2d, Translation2d>> getObstacles(int id) {
         List<SmartOpponent> robots = getOpponents();
         List<Pair<Translation2d, Translation2d>> obs = new ArrayList<>(robots.size() + 1);
         Translation2d offset = new Translation2d(.5, .5);
         for (SmartOpponent robot : robots) {
-            obs.add(new Pair<>(
-                    robot.getPose().getTranslation().plus(offset),
-                    robot.getPose().getTranslation().minus(offset)));
+            if (robot.id != id) {
+                obs.add(new Pair<>(
+                        robot.getPose().getTranslation().plus(offset),
+                        robot.getPose().getTranslation().minus(offset)));
+            }
         }
         return obs;
     }
 
-    protected static class ManagerConstants {
-        protected static final Pose2d[] ROBOT_QUEENING_POSITIONS = new Pose2d[] {
+    public static class ManagerConstants {
+        // Add more starting positions externally if needed. This only covers a regular match for now.
+        public static final Pose2d[] ROBOT_QUEENING_POSITIONS = new Pose2d[] {
                         new Pose2d(-6, 0, new Rotation2d()),
                         new Pose2d(-5, 0, new Rotation2d()),
                         new Pose2d(-4, 0, new Rotation2d()),
                         new Pose2d(-3, 0, new Rotation2d()),
                         new Pose2d(-2, 0, new Rotation2d())
                 };
-        protected static final Pose2d[] STARTING_POSITIONS = new Pose2d[]
+        public static final Pose2d[] STARTING_POSITIONS = new Pose2d[]
                 {
                         new Pose2d(15, 6, Rotation2d.fromDegrees(180)),
                         new Pose2d(15, 4, Rotation2d.fromDegrees(180)),

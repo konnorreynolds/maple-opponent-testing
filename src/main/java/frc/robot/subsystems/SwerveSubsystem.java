@@ -352,12 +352,10 @@ public class SwerveSubsystem extends SubsystemBase
 
       // Get the positions of the notes (both on the field and in the air);
       coralPoses.set(SimulatedArena.getInstance()
-              .getGamePiecesByType("Coral")
-              .toArray(Pose3d[]::new)
+              .getGamePiecesArrayByType("Coral")
       );
       algaePoses.set(SimulatedArena.getInstance()
-              .getGamePiecesByType("Algae")
-              .toArray(Pose3d[]::new)
+              .getGamePiecesArrayByType("Algae")
       );
   }
 }

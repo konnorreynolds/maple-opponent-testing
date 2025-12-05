@@ -1,7 +1,6 @@
 package org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim;
 
 import edu.wpi.first.math.MathUtil;
-import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
@@ -14,14 +13,9 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import org.ironmaple.simulation.SimulatedArena;
-import org.ironmaple.simulation.gamepieces.GamePieceProjectile;
-import org.ironmaple.simulation.opponentsim.OpponentManager;
 import org.ironmaple.simulation.opponentsim.SmartOpponent;
-import org.ironmaple.simulation.seasonspecific.reefscape2025.ReefscapeAlgaeOnFly;
 import org.ironmaple.simulation.seasonspecific.reefscape2025.ReefscapeCoralOnFly;
 import org.ironmaple.utils.FieldMirroringUtils;
-
-import java.util.Optional;
 
 import static edu.wpi.first.units.Units.*;
 
@@ -137,8 +131,17 @@ public class KitBot extends SmartOpponent {
     }
 
     @Override
-    protected Pose2d getNextScoreTarget() {
-        return ((ReefscapeOpponentManager) manager).getNextCoralScoreTarget(alliance, id).getFirst();
+    protected Command score() {
+        return coralFeedShotCommand();
     }
 
+    @Override
+    protected void getNextScoreTarget() {
+        targetTask = ((ReefscapeOpponentManager) manager).getNextCoralScoreTarget(alliance, id);
+    }
+
+    @Override
+    public void simulationPeriodic() {
+        super.simulationPeriodic();
+    }
 }

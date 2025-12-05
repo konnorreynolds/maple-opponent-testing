@@ -1,6 +1,7 @@
 package org.ironmaple.simulation.opponentsim;
 
 
+import com.pathplanner.lib.config.ModuleConfig;
 import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
@@ -8,8 +9,6 @@ import com.pathplanner.lib.path.Waypoint;
 import com.pathplanner.lib.trajectory.PathPlannerTrajectoryState;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.Pair;
-import edu.wpi.first.math.filter.Debouncer;
-import edu.wpi.first.math.filter.LinearFilter;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -18,7 +17,6 @@ import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StringPublisher;
 import edu.wpi.first.networktables.StructPublisher;
-import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.Distance;
 import edu.wpi.first.units.measure.LinearVelocity;
 import edu.wpi.first.units.measure.Mass;
@@ -37,14 +35,11 @@ import org.ironmaple.simulation.drivesims.SwerveDriveSimulation;
 import org.ironmaple.simulation.drivesims.configs.DriveTrainSimulationConfig;
 import org.ironmaple.simulation.gamepieces.GamePieceProjectile;
 import org.ironmaple.simulation.opponentsim.pathfinding.MapleADStar;
-import org.ironmaple.simulation.seasonspecific.reefscape2025.ReefscapeAlgaeOnFly;
-import org.ironmaple.simulation.seasonspecific.reefscape2025.ReefscapeCoralOnFly;
+import org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim.ReefscapeOpponentManager;
 import org.ironmaple.utils.FieldMirroringUtils;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Predicate;
 
 import static edu.wpi.first.units.Units.*;
 
@@ -54,9 +49,9 @@ public abstract class SmartOpponent extends SubsystemBase {
 
     protected DriverStation.Alliance alliance;
 
-    protected OpponentManager manager;
-
     protected SelfControlledSwerveDriveSimulation simulation;
+
+    protected OpponentManager manager;
 
     protected States currentState;
 
@@ -97,7 +92,7 @@ public abstract class SmartOpponent extends SubsystemBase {
     protected DriveTrainSimulationConfig driveConfig;
     protected MapleADStar mapleADStar;
     // Static settings
-    protected Double joystickDeadzone = 0.1;
+    protected Double joystickDeadzone = 0.1; // TODO Make non-static
     protected Distance driveToPoseCollectTolerance = Inches.of(8);
     protected Distance driveToPoseScoreTolerance = Inches.of(3);
     protected String robotName = "Smart Opponent";
@@ -115,16 +110,30 @@ public abstract class SmartOpponent extends SubsystemBase {
         this.driveConfig = DriveTrainSimulationConfig.Default();
         this.simulation = new SelfControlledSwerveDriveSimulation(new SwerveDriveSimulation(
                         driveConfig,
-                        queeningPose));
+                        queeningPose
+                ));
         this.driveController = new PPHolonomicDriveController(new PIDConstants(5.0, 0.0), new PIDConstants(5.0, 0.0));
         this.isJoystick = Optional.of(new Trigger(() -> currentState == States.JOYSTICK));
+        this.pathplannerConfig = new RobotConfig(
+                    opponentMassKG.in(Kilograms),
+                    opponentMOI,
+                    new ModuleConfig(
+                            opponentWheelRadius.in(Inches),
+                            opponentDriveVelocity.in(MetersPerSecond),
+                            opponentDriveCOF,
+                            opponentDriveMotor,
+                            opponentDriveCurrentLimit,
+                            opponentNumDriveMotors),
+                    opponentTrackWidth.in(Meters));
         SimulatedArena.getInstance().addDriveTrainSimulation(
                 this.simulation.getDriveTrainSimulation());
-        this.posePublisher = NetworkTableInstance.getDefault()
+        this.posePublisher =
+                NetworkTableInstance.getDefault()
                         .getStructTopic("SmartDashboard/MapleSim/SimulatedRobots/Poses/ "
                                 + (alliance.equals(DriverStation.Alliance.Red) ? "Red Alliance " : "Blue Alliance ")
                                 + robotName + " " + id + " Pose", Pose2d.struct).publish();
-        this.statePublisher = NetworkTableInstance.getDefault()
+        this.statePublisher =
+                NetworkTableInstance.getDefault()
                         .getStringTopic("SmartDashboard/MapleSim/SimulatedRobots/States/ "
                                 + (alliance.equals(DriverStation.Alliance.Red) ? "Red Alliance " : "Blue Alliance ")
                                 + robotName + " " + id + " Current State").publish();
@@ -199,7 +208,7 @@ public abstract class SmartOpponent extends SubsystemBase {
 
     @Override
     public void simulationPeriodic() {
-        if (!commandInProgress && (previousState == null || currentState != previousState)) {
+        if (!commandInProgress && currentState != previousState) {
             runStateCommand(currentState);
             previousState = currentState;
             commandInProgress = true;
@@ -226,7 +235,7 @@ public abstract class SmartOpponent extends SubsystemBase {
                 .andThen(Commands.runOnce(() -> simulation.runChassisSpeeds(
                         new ChassisSpeeds(), new Translation2d(), false, false), this))
                 .ignoringDisable(true)
-                .andThen(Commands.waitSeconds(1))
+                .andThen(Commands.waitSeconds(.25))
                 .andThen(() -> setState(States.COLLECT));
     }
 
@@ -240,23 +249,27 @@ public abstract class SmartOpponent extends SubsystemBase {
      */
     protected Command collectCommand() {
 
-        return (pathfindCommand(getNextCollectTarget(), driveToPoseCollectTolerance).withTimeout(7)
+        return (pathfindCommand(ReefscapeOpponentManager.ReefscapeManagerConstants.LEFT_STATION_CENTER_POSE, driveToPoseCollectTolerance).withTimeout(7)
                 .alongWith(collect())
                 .andThen(Commands.waitSeconds(0.5)))
                 .andThen(() -> setState(States.SCORE));
     }
 
-    protected Pose2d getNextScoreTarget() {
+    protected void getNextScoreTarget() {
         targetTask = manager.getNextScoreTarget(alliance, id);
-        return targetTask.getFirst();
+    }
+
+    public Command runChassisSpeeds(ChassisSpeeds speeds) {
+        return Commands.run(() -> simulation.runChassisSpeeds(speeds, new Translation2d(), false, false), this);
     }
 
     /**
      *
      */
     protected Command scoreCommand() {
+        getNextScoreTarget();
         return
-                (pathfindCommand(getNextScoreTarget(), driveToPoseScoreTolerance).withTimeout(7)
+                (pathfindCommand(targetTask.getFirst(), driveToPoseScoreTolerance).withTimeout(7)
                         .andThen(Commands.waitSeconds(0.5)))
                         .andThen(score())
                         .andThen(() -> setState(States.COLLECT));
@@ -328,39 +341,56 @@ public abstract class SmartOpponent extends SubsystemBase {
      * @return
      */
     protected Command pathfindCommand(Pose2d finalPose, Distance tolerance) {
+        DriverStation.reportWarning("Pathfind command has been reached", false);
         mapleADStar.setStartPosition(simulation.getActualPoseInSimulationWorld().getTranslation());
         mapleADStar.setGoalPosition(finalPose.getTranslation());
         mapleADStar.runThread();
         return (Commands.run(() -> {
-                    mapleADStar.setDynamicObstacles(manager.getObstacles(), simulation.getActualPoseInSimulationWorld().getTranslation());
-                    Pose2d currentPose = simulation.getActualPoseInSimulationWorld();
-                    List<Waypoint> waypoints = mapleADStar.currentWaypoints;
-                    Translation2d targetTranslation;
-                    Rotation2d targetRotation;
-                    if (!waypoints.isEmpty()) {
-                        targetTranslation = waypoints.get(0).anchor();
-                        targetRotation = currentPose.getRotation().interpolate(finalPose.getRotation(), waypoints.size());
-                        if (currentPose.getTranslation().getDistance(targetTranslation) < tolerance.in(Meters)) {
-                            waypoints.remove(0);
-                        }
-                    } else {
-                        targetTranslation = finalPose.getTranslation();
-                        targetRotation = finalPose.getRotation();
-                    }
-                    Pose2d targetPose = new Pose2d(targetTranslation, targetRotation);
-                    PathPlannerTrajectoryState state = new PathPlannerTrajectoryState();
-                    state.pose = targetPose;
+            // Check if near another opponent.
+//            for (SmartOpponent opponent : manager.getOpponents()) {
+//                if (opponent != this) {
+//                    if (nearPose(opponent.getPose(), tolerance)) {
+//                        mapleADStar.setDynamicObstacles(manager.getObstacles(id), simulation.getActualPoseInSimulationWorld().getTranslation());
+//                        mapleADStar.runThread();
+//                    }
+//                    break;
+//                }
+//            }
 
-                    ChassisSpeeds speeds = driveController.calculateRobotRelativeSpeeds(
-                            currentPose,
-                            state);
-                    simulation.runChassisSpeeds(speeds, new Translation2d(), false, false);
-                }, this)
-                .until(() -> {
-                    List<Waypoint> waypoints = mapleADStar.currentWaypoints;
-                    return waypoints.isEmpty() && nearPose(finalPose, tolerance);
-                })
-                .finallyDo(() -> simulation.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false)));
+            Pose2d currentPose = simulation.getActualPoseInSimulationWorld();
+            // Get waypoints
+            List<Waypoint> waypoints = mapleADStar.currentWaypoints;
+            Translation2d targetTranslation;
+            Rotation2d targetRotation;
+            // If there's more waypoints, generate a new target.
+            if (!waypoints.isEmpty()) {
+                DriverStation.reportWarning("Waypoints Count: " + waypoints.size(), false);
+                targetTranslation = waypoints.get(0).anchor();
+                targetRotation = currentPose.getRotation().interpolate(finalPose.getRotation(), waypoints.size());
+                // If the target is close enough to the current pose, remove it.
+                if (nearPose(new Pose2d(targetTranslation, targetRotation), tolerance.times(2.0))) {
+                    waypoints.remove(0);
+                }
+            // Else there are no more waypoints, set the target to the final pose.
+            } else {
+                targetTranslation = finalPose.getTranslation();
+                targetRotation = finalPose.getRotation();
+            }
+            Pose2d targetPose = new Pose2d(targetTranslation, targetRotation);
+            PathPlannerTrajectoryState state = new PathPlannerTrajectoryState();
+            state.pose = targetPose;
+            // Reset controller for best results
+            driveController.reset(simulation.getActualPoseInSimulationWorld(), simulation.getActualSpeedsFieldRelative());
+            // Calculate field-centric speed to the next waypoint.
+            ChassisSpeeds speeds = driveController.calculateRobotRelativeSpeeds(
+                    currentPose,
+                    state);
+            DriverStation.reportWarning("Robot-centric speed: " + speeds.toString(), false);
+            // Run the robot-centric speed
+            simulation.runChassisSpeeds(speeds, new Translation2d(), false, false);
+        }, this)
+        .until(() -> mapleADStar.currentWaypoints.isEmpty() && nearPose(finalPose, tolerance))
+        .finallyDo(() -> simulation.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false)));
     }
 
     public Pair<Pose2d, String> getTargetTask() {

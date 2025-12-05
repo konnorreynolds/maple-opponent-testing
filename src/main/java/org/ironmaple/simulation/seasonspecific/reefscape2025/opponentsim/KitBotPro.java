@@ -1,6 +1,5 @@
 package org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim;
 
-import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.units.measure.Angle;
@@ -32,11 +31,6 @@ public class KitBotPro extends SmartOpponent {
     }
     // TODO: Make joystick drive accept bindings easily, Event-loop?
     // TODO: Properly Comment
-
-    @Override
-    protected Pose2d getNextScoreTarget() {
-        return manager.getNextScoreTarget(alliance, id).getFirst();
-    }
 
     @Override
     protected Command score() {

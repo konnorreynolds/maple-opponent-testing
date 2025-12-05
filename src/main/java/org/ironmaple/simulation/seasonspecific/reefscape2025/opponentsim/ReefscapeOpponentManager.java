@@ -6,6 +6,8 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Transform2d;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import org.ironmaple.simulation.opponentsim.pathfinding.MapleADStar;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,11 +15,18 @@ import java.util.List;
 public class ReefscapeOpponentManager extends org.ironmaple.simulation.opponentsim.OpponentManager {
 
 
+    /**
+     * MapleSim Opponent sim currently relies on Pathplanner with a modified pathfinder.
+     * This is to be changed soon. ^TM
+     */
+    public ReefscapeOpponentManager() {
+        super();
+    }
 
     public Pair<Pose2d, String> getNextAlgaeScoreTarget(DriverStation.Alliance alliance, int id) {
         boolean targetExists = false;
-        // Target = targetArray.get(rand()[0-1] * targetArray.size());
-        Pose2d target = ReefscapeManagerConstants.TARGET_BARGE_POSES.get(((int) Math.round(Math.random() * ReefscapeManagerConstants.TARGET_BARGE_POSES.size())));
+        // Target = targetArray.get(rand()[0-1] * targetArray.size() - 1); // Array values start at 0, size starts at 1, subtract 1.
+        Pose2d target = ReefscapeManagerConstants.TARGET_BARGE_POSES.get(((int) Math.round(Math.random() * (ReefscapeManagerConstants.TARGET_BARGE_POSES.size() - 1))));
         for (Pair<Pose2d, Integer> pair : robotTargets) {
             if (pair.getFirst().equals(target)) {
                 targetExists = true;
@@ -35,8 +44,8 @@ public class ReefscapeOpponentManager extends org.ironmaple.simulation.opponents
 
     public Pair<Pose2d, String> getNextCoralScoreTarget(DriverStation.Alliance alliance, int id) {
         boolean targetExists = false;
-        // Target = targetArray.get(rand()[0-1] * targetArray.size());
-        Pose2d target = ReefscapeManagerConstants.TARGET_REEF_POSES.get(((int) Math.round(Math.random() * ReefscapeManagerConstants.TARGET_REEF_POSES.size())));
+        // Target = targetArray.get(rand()[0-1] * targetArray.size() - 1); // Array values start at 0, size starts at 1, subtract 1.
+        Pose2d target = ReefscapeManagerConstants.TARGET_REEF_POSES.get(((int) Math.round(Math.random() * (ReefscapeManagerConstants.TARGET_REEF_POSES.size() - 1))));
         for (Pair<Pose2d, Integer> pair : robotTargets) {
             if (pair.getFirst().equals(target)) {
                 targetExists = true;
@@ -79,9 +88,9 @@ public class ReefscapeOpponentManager extends org.ironmaple.simulation.opponents
     @Override
     public Pair<Pose2d, String> getNextCollectTarget(DriverStation.Alliance alliance, int id) {
         boolean targetExists = false;
-        // Target = targetArray.get(rand()[0-1] * targetArray.size());
-        Pose2d target = ReefscapeManagerConstants.STATION_POSES.get(((int) Math.round(Math.random() * ReefscapeManagerConstants.STATION_POSES.size())));
-        for (Pair<Pose2d, Integer> pair : robotTargets) {
+        // Target = targetArray.get(rand()[0-1] * targetArray.size() - 1); // Array values start at 0, size starts at 1, subtract 1.
+        Pose2d target = ReefscapeManagerConstants.STATION_POSES.get(((int) Math.round(Math.random() * (ReefscapeManagerConstants.STATION_POSES.size() - 1))));
+            for (Pair<Pose2d, Integer> pair : robotTargets) {
             if (pair.getFirst().equals(target)) {
                 targetExists = true;
                 break;
@@ -96,7 +105,7 @@ public class ReefscapeOpponentManager extends org.ironmaple.simulation.opponents
         return Pair.of(target, "Station"); // Only Station
     }
 
-    private static class ReefscapeManagerConstants extends ManagerConstants {
+    public static class ReefscapeManagerConstants extends ManagerConstants {
 
         public static final Transform2d STATION_OFFSET = new Transform2d(
                 Units.inchesToMeters(-17),
