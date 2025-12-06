@@ -348,6 +348,7 @@ public class SwerveSubsystem extends SubsystemBase
   @Override
   public void simulationPeriodic()
   {
+    SimulatedArena.getInstance().simulationPeriodic();
     drive.simIterate();
 
       // Get the positions of the notes (both on the field and in the air);

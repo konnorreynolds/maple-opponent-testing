@@ -24,8 +24,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 /**
  * Implementation of AD* running locally in a background thread
  *
- * COPIED INTO MapleSim with minor modifications exposing things.
- *
  * <p>I would like to apologize to anyone trying to understand this code. The implementation I
  * translated it from was much worse.
  */

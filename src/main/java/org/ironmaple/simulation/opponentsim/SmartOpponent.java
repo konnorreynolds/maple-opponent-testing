@@ -1,467 +1,354 @@
 package org.ironmaple.simulation.opponentsim;
 
-
-import com.pathplanner.lib.config.ModuleConfig;
-import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
-import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import com.pathplanner.lib.path.Waypoint;
-import com.pathplanner.lib.trajectory.PathPlannerTrajectoryState;
-import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.Pair;
+import edu.wpi.first.math.controller.HolonomicDriveController;
+import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
-import edu.wpi.first.math.system.plant.DCMotor;
-import edu.wpi.first.networktables.NetworkTableInstance;
-import edu.wpi.first.networktables.StringPublisher;
-import edu.wpi.first.networktables.StructPublisher;
-import edu.wpi.first.units.measure.Distance;
-import edu.wpi.first.units.measure.LinearVelocity;
-import edu.wpi.first.units.measure.Mass;
+import edu.wpi.first.math.trajectory.TrapezoidProfile;
+import edu.wpi.first.networktables.*;
 import edu.wpi.first.wpilibj.DriverStation;
-import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
-import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
-import edu.wpi.first.wpilibj2.command.button.Trigger;
+import org.ironmaple.simulation.IntakeSimulation;
 import org.ironmaple.simulation.SimulatedArena;
 import org.ironmaple.simulation.drivesims.SelfControlledSwerveDriveSimulation;
-import org.ironmaple.simulation.drivesims.SwerveDriveSimulation;
-import org.ironmaple.simulation.drivesims.configs.DriveTrainSimulationConfig;
 import org.ironmaple.simulation.gamepieces.GamePieceProjectile;
+import org.ironmaple.simulation.opponentsim.configs.SmartOpponentConfig;
 import org.ironmaple.simulation.opponentsim.pathfinding.MapleADStar;
-import org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim.ReefscapeOpponentManager;
 import org.ironmaple.utils.FieldMirroringUtils;
 
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 import static edu.wpi.first.units.Units.*;
 
 public abstract class SmartOpponent extends SubsystemBase {
-
-    protected Integer id;
-
-    protected DriverStation.Alliance alliance;
-
-    protected SelfControlledSwerveDriveSimulation simulation;
-
-    protected OpponentManager manager;
-
-    protected States currentState;
-
-    protected States previousState = null;
-
-    protected boolean commandInProgress = false;
-
-    protected Pose2d startPose;
-
-    protected Pose2d queeningPose;
-
-    protected StructPublisher<Pose2d> posePublisher;
-
+    /// Publishers
     protected StringPublisher statePublisher;
-
-    protected Optional<Trigger> isJoystick = Optional.empty();
-
-    protected SendableChooser<Command> behaviorChooser;
-
-    protected Pair<Pose2d, String> targetTask;
-
-    protected PPHolonomicDriveController driveController;
-
-    // MapleSim simulated drive train.
-    protected Mass opponentMassKG;
-    protected Double opponentMOI;
-    protected Distance opponentWheelRadius;
-    protected LinearVelocity opponentDriveVelocity;
-    protected Double opponentDriveCOF;
-    protected DCMotor opponentDriveMotor;
-    protected Double opponentDriveCurrentLimit;
-    protected Integer opponentNumDriveMotors;
-    protected Distance opponentTrackWidth;
-    protected Optional<Object> joystick = Optional.empty();
-
-    // PathPlanner configuration
+    protected StructPublisher<Pose2d> posePublisher;
+    // String used in telemetry for alliance.
+    protected String allianceString;
+    /// The SmartOpponentConfig to use.
+    protected SmartOpponentConfig config;
+    /// The manipulator simulation.
+    protected ManipulatorSim manipulatorSim;
+    /// The drivetrain simulation.
+    protected SelfControlledSwerveDriveSimulation drivetrainSim;
+    /// The pathplanner config
     protected RobotConfig pathplannerConfig;
-    protected DriveTrainSimulationConfig driveConfig;
-    protected MapleADStar mapleADStar;
-    // Static settings
-    protected Double joystickDeadzone = 0.1; // TODO Make non-static
-    protected Distance driveToPoseCollectTolerance = Inches.of(8);
-    protected Distance driveToPoseScoreTolerance = Inches.of(3);
-    protected String robotName = "Smart Opponent";
+    /// Pathplanner HolonomicDriveController
+    protected HolonomicDriveController driveController;
+    /// Opponent Management
+    // Opponents current and last states.
+    public String currentState;
+    public String lastState;
+    // Pathfinding class cloned for modification.
+    private final MapleADStar mapleADStar;
+    // Behavior Chooser Publisher
+    private final StringPublisher selectedBehaviorPublisher;
 
-    /**
-     * @param id
-     * @param alliance
-     */
-    public void setupOpponent(OpponentManager manager, DriverStation.Alliance alliance, int id) {
-        this.id = id;
-        this.alliance = alliance;
-        this.manager = manager;
-        this.startPose = manager.getStartingPose(alliance, id);
-        this.queeningPose = manager.getQueeningPose(id);
-        this.driveConfig = DriveTrainSimulationConfig.Default();
-        this.simulation = new SelfControlledSwerveDriveSimulation(new SwerveDriveSimulation(
-                        driveConfig,
-                        queeningPose
-                ));
-        this.driveController = new PPHolonomicDriveController(new PIDConstants(5.0, 0.0), new PIDConstants(5.0, 0.0));
-        this.isJoystick = Optional.of(new Trigger(() -> currentState == States.JOYSTICK));
-        this.pathplannerConfig = new RobotConfig(
-                    opponentMassKG.in(Kilograms),
-                    opponentMOI,
-                    new ModuleConfig(
-                            opponentWheelRadius.in(Inches),
-                            opponentDriveVelocity.in(MetersPerSecond),
-                            opponentDriveCOF,
-                            opponentDriveMotor,
-                            opponentDriveCurrentLimit,
-                            opponentNumDriveMotors),
-                    opponentTrackWidth.in(Meters));
-        SimulatedArena.getInstance().addDriveTrainSimulation(
-                this.simulation.getDriveTrainSimulation());
-        this.posePublisher =
-                NetworkTableInstance.getDefault()
-                        .getStructTopic("SmartDashboard/MapleSim/SimulatedRobots/Poses/ "
-                                + (alliance.equals(DriverStation.Alliance.Red) ? "Red Alliance " : "Blue Alliance ")
-                                + robotName + " " + id + " Pose", Pose2d.struct).publish();
-        this.statePublisher =
-                NetworkTableInstance.getDefault()
-                        .getStringTopic("SmartDashboard/MapleSim/SimulatedRobots/States/ "
-                                + (alliance.equals(DriverStation.Alliance.Red) ? "Red Alliance " : "Blue Alliance ")
-                                + robotName + " " + id + " Current State").publish();
-        this.targetTask = Pair.of(Pose2d.kZero, "Standby");
+    public SmartOpponent(SmartOpponentConfig config) {
+        /// Create and verify config.
+        this.config = config;
+        config.validConfig(); // Throw an error if the config is invalid.
+        /// Initialize simulations
+        this.drivetrainSim = config.chassis.updateDriveTrainSim(config.initialPose);
+        this.pathplannerConfig = config.chassis.updatePathplannerConfig();
+        this.driveController = new HolonomicDriveController(
+                new PIDController(5, 0, 0),
+                new PIDController(5, 0, 0),
+                new ProfiledPIDController(5, 0, 0,
+                        new TrapezoidProfile.Constraints(
+                                config.chassis.maxLinearVelocity.in(MetersPerSecond),
+                                config.chassis.maxAngularVelocity.in(DegreesPerSecond))));
+        // Cloned Pathfinder for use here.
         this.mapleADStar = new MapleADStar();
-        setState(States.STANDBY);
-        buildBehaviorChooser(id, alliance);
-        manager.registerOpponent(this, alliance);
-    }
-
-    /**
-     * @param newState
-     */
-    protected void setState(States newState) {
-        currentState = newState;
-    }
-
-    /**
-     *
-     */
-    public void runStateCommand(States newState) {
-        if (commandInProgress) return;
-
-        Command stateCommand = switch (newState) {
-            case STANDBY -> standbyCommand();
-            case STARTING -> startingCommand();
-            case COLLECT -> collectCommand();
-            case SCORE -> scoreCommand();
-            case JOYSTICK -> joystickCommand();
-            case DEFEND -> defendCommand();
-        };
-
-        if (stateCommand != null) {
-            commandInProgress = true;
-            States thisState = currentState; // States change during the state command.
-            stateCommand
-                    .finallyDo(() -> {
-                        commandInProgress = false;
-                        previousState = thisState;
-                    }).schedule();
+        // Alliance string for telemetry.
+        this.allianceString = DriverStation.Alliance.Blue.equals(config.alliance) ? "Blue Alliance/" : "Red Alliance/";
+        // NetworkTable setup.
+        this.statePublisher = NetworkTableInstance.getDefault()
+                .getStringTopic(config.telemetryPath + "SimulatedOpponents/States/" + allianceString
+                        + config.name + "'s Current State").publish();
+        this.posePublisher = NetworkTableInstance.getDefault()
+                .getStructTopic(config.telemetryPath + "SimulatedOpponents/Poses/" + allianceString
+                        + config.name + "'s Pose2d", Pose2d.struct).publish();
+        this.selectedBehaviorPublisher = NetworkTableInstance.getDefault()
+                .getTable(config.smartDashboardPath + "SimulatedOpponents/Behaviors/" + allianceString + config.name + "'s Behaviors")
+                .getStringTopic("selected")
+                .publish();
+        /// Adds the required states to run the {@link org.ironmaple.simulation.opponentsim.SmartOpponent}.
+        config.getStates().put("Standby", standbyState());
+        config.getStates().put("Starting", startingState("Collect"));
+        config.getStates().put("Collect", collectState());
+        config.getStates().put("Score", scoreState());
+        setState("Standby");
+        /// Adds options to the behavior sendable chooser.
+        config.addBehavior("Disabled", runState("Standby", true), true);
+        config.addBehavior("Enabled", runState("Starting", true), false);
+        // Update the chooser and then publish it.
+        SmartDashboard.putData(config.smartDashboardPath + "SimulatedOpponents/Behaviors/" + allianceString
+                + config.name + "'s Behaviors", config.updateBehaviorChooser());
+        /// Run behavior command when changed.
+        config.getBehaviorChooser().onChange(Command::schedule);
+        /// Finally, add our simulation
+        SimulatedArena.getInstance().addDriveTrainSimulation(drivetrainSim.getDriveTrainSimulation());
+        if (true) {
+            RobotModeTriggers.teleop().onTrue(setSelectedBehavior("Enabled"));
+            RobotModeTriggers.disabled().onTrue(setSelectedBehavior("Disabled"));
         }
     }
 
-    /**
-     * Build the behavior chooser of this opponent robot and send it to the dashboard
-     */
-    protected void buildBehaviorChooser(int id, DriverStation.Alliance alliance) {
-        this.behaviorChooser = new SendableChooser<>();
-        // Option to disable the robot
-        behaviorChooser.setDefaultOption("Disable", Commands.runOnce(() -> setState(States.STANDBY))
-                .andThen(standbyCommand()));
-
-        // Option to auto-cycle random
-        behaviorChooser.addOption(
-                "Smart Cycle", Commands.runOnce(() -> setState(States.STARTING)));
-
-        // Schedule the command when another behavior is selected
-        behaviorChooser.onChange((Command::schedule));
-
-        // Schedule the selected command when teleop starts
-        RobotModeTriggers.teleop()
-                .onTrue(Commands.runOnce(() -> behaviorChooser.getSelected().schedule()));
-
-        // Disable the robot when the user robot is disabled
-        RobotModeTriggers.disabled().onTrue(Commands.runOnce(() -> setState(States.STANDBY))
-                .andThen(standbyCommand()));
-
-        SmartDashboard.putData("MapleSim/SimulatedRobots/Behaviors/ "
-                + (alliance.equals(DriverStation.Alliance.Red) ? "Red Alliance " : "Blue Alliance ")
-                + robotName + " " + id + " Behavior", behaviorChooser);
-    }
-
-    @Override
-    public void simulationPeriodic() {
-        if (!commandInProgress && currentState != previousState) {
-            runStateCommand(currentState);
-            previousState = currentState;
-            commandInProgress = true;
-            statePublisher.set(currentState.toString());
-        }
-        posePublisher.set(simulation.getActualPoseInSimulationWorld());
+    public Command setSelectedBehavior(String behavior) {
+        return runOnce(() -> selectedBehaviorPublisher.set(behavior));
     }
 
     /**
+     * The standby state to run.
      *
+     * @return a Command that runs the state.
      */
-    protected Command standbyCommand() {
-        return Commands.runOnce(() -> simulation.runChassisSpeeds(
-                        new ChassisSpeeds(), new Translation2d(), false, false), this)
-                .andThen(Commands.runOnce(() -> simulation.setSimulationWorldPose(queeningPose), this))
+    protected Command standbyState() {
+        return runOnce(() -> drivetrainSim.runChassisSpeeds(
+                new ChassisSpeeds(), new Translation2d(), false, false))
+                .andThen(runOnce(() -> drivetrainSim.setSimulationWorldPose(config.initialPose)))
                 .ignoringDisable(true);
     }
 
     /**
+     * The starting state to run.
      *
+     * @return a Command that runs the state.
      */
-    protected Command startingCommand() {
-        return Commands.runOnce(() -> simulation.setSimulationWorldPose(startPose))
-                .andThen(Commands.runOnce(() -> simulation.runChassisSpeeds(
-                        new ChassisSpeeds(), new Translation2d(), false, false), this))
-                .ignoringDisable(true)
-                .andThen(Commands.waitSeconds(.25))
-                .andThen(() -> setState(States.COLLECT));
-    }
-
-    protected Pose2d getNextCollectTarget() {
-        targetTask = manager.getNextCollectTarget(alliance, id);
-        return targetTask.getFirst();
+    protected Command startingState(String nextState) {
+        return runOnce(() -> drivetrainSim.runChassisSpeeds(
+                new ChassisSpeeds(), new Translation2d(), false, false))
+                .andThen(runOnce(() -> drivetrainSim.setSimulationWorldPose(config.initialPose)))
+                .andThen(Commands.waitSeconds(0.25))
+                .andThen(() -> setState(nextState))
+                .ignoringDisable(true);
     }
 
     /**
+     * The collect state to run.
      *
+     * @return a runnable that runs the state.
      */
-    protected Command collectCommand() {
-
-        return (pathfindCommand(ReefscapeOpponentManager.ReefscapeManagerConstants.LEFT_STATION_CENTER_POSE, driveToPoseCollectTolerance).withTimeout(7)
-                .alongWith(collect())
-                .andThen(Commands.waitSeconds(0.5)))
-                .andThen(() -> setState(States.SCORE));
-    }
-
-    protected void getNextScoreTarget() {
-        targetTask = manager.getNextScoreTarget(alliance, id);
-    }
-
-    public Command runChassisSpeeds(ChassisSpeeds speeds) {
-        return Commands.run(() -> simulation.runChassisSpeeds(speeds, new Translation2d(), false, false), this);
-    }
+    abstract protected Command collectState();
 
     /**
+     * The score state to run.
      *
+     * @return a runnable that runs the state.
      */
-    protected Command scoreCommand() {
-        getNextScoreTarget();
-        return
-                (pathfindCommand(targetTask.getFirst(), driveToPoseScoreTolerance).withTimeout(7)
-                        .andThen(Commands.waitSeconds(0.5)))
-                        .andThen(score())
-                        .andThen(() -> setState(States.COLLECT));
-    }
+    abstract protected Command scoreState();
 
-    /**
-     * @return
-     */
-    protected Command joystickCommand() {
-        if (joystick.isPresent() && joystick.get() instanceof CommandXboxController) {
-            return joystickDrive();
-        } else {
-            return Commands.runOnce(() -> DriverStation.reportWarning("No Joystick found, use .withJoystick() on SmartOpponent instance", false), this);
+    @Override
+    public void simulationPeriodic() {
+        boolean commandInProgress = getCurrentCommand() != null && getCurrentCommand().isFinished();
+        if (!commandInProgress && !Objects.equals(lastState, currentState)) {
+            runState(currentState, true);
+            lastState = currentState;
         }
+        drivetrainSim.periodic();
+        statePublisher.set(currentState);
+        posePublisher.set(drivetrainSim.getActualPoseInSimulationWorld());
     }
 
     /**
-     * @return {@link SmartOpponent} for chaining.
+     * Sets the current state of the robot.
+     * This waits it's turn patiently for the command to finish.
+     *
+     * @param state The state to set.
+     * @return this, for chaining.
      */
-    public SmartOpponent withJoystick(CommandXboxController controller) {
-        this.joystick = Optional.of(controller);
-        behaviorChooser.addOption("Joystick Drive", Commands.runOnce(() -> setState(States.JOYSTICK)));
+    public SmartOpponent setState(String state) {
+        currentState = state;
         return this;
     }
 
     /**
+     * Runs a state as a command.
      *
+     * @param state      The state to run.
+     * @param forceState Whether to force the state to run even if it is already running.
+     * @return The command to run the state.
      */
-    protected Command joystickDrive() {
-        if (joystick.isPresent()
-                && joystick.get() instanceof CommandXboxController controller) {
-            return Commands.runOnce(() -> simulation.setSimulationWorldPose(startPose))
-                    .andThen(Commands.runOnce(() -> simulation.runChassisSpeeds(
-                            new ChassisSpeeds(), new Translation2d(), false, false), this))
-                    .ignoringDisable(true)
-                    .andThen(Commands.waitSeconds(1))
-                    .andThen(Commands.run(() -> {
-                        // Calculate field-centric speed from driverstation speed
-                        final ChassisSpeeds speeds = ChassisSpeeds.fromFieldRelativeSpeeds(
-                                new ChassisSpeeds(
-                                        MathUtil.applyDeadband(-controller.getLeftY(), joystickDeadzone) * simulation.maxLinearVelocity().in(MetersPerSecond),
-                                        MathUtil.applyDeadband(-controller.getLeftX(), joystickDeadzone) * simulation.maxLinearVelocity().in(MetersPerSecond),
-                                        MathUtil.applyDeadband(-controller.getRightX(), joystickDeadzone) * simulation.maxAngularVelocity().in(RadiansPerSecond)),
-                                DriverStation.getAlliance().equals(Optional.of(alliance)) ?
-                                        FieldMirroringUtils.getCurrentAllianceDriverStationFacing() :
-                                        FieldMirroringUtils.getCurrentAllianceDriverStationFacing()
-                                                .plus(Rotation2d.k180deg));
-                        // Run the field-centric speed
-                        simulation.runChassisSpeeds(speeds, new Translation2d(), false, false);
-                    }, this));
+    public Command runState(String state, boolean forceState) {
+        boolean commandInProgress = getCurrentCommand() != null && getCurrentCommand().isFinished();
+        if (!forceState) {
+            // If already in the state or a command is in progress, return nothing.
+            if (currentState.equals(state) || commandInProgress) {
+                setState(state); // Make state wait for command to finish.
+                return Commands.none();
+            }
         } else {
-            return Commands.runOnce(() -> DriverStation.reportWarning("No Joystick found, use .withJoystick()[Some overrides may use different methods]", false), this);
+            if (getCurrentCommand() != null) {
+                getCurrentCommand().cancel();
+            }
         }
+        Command desiredState = config.getStates().get(state);
+        return Objects.requireNonNullElseGet(desiredState, Commands::none);
     }
 
     /**
-     * This should probably just cycle between 2 poses
+     * Pathfinds to a target pose.
      *
-     * @return
+     * @param targetPose The target pose.
+     * @return A command to pathfind to the target pose.
      */
-    protected Command defendCommand() {
-        return Commands.runOnce(() -> DriverStation.reportWarning("No defend state implemented", false), this);
-    }
-
-    /**
-     * This uses PP NavGrid // TODO: Remove Pathplanner dependency, use a more efficient pathfinding algorithm.
-     *
-     * @param finalPose
-     * @return
-     */
-    protected Command pathfindCommand(Pose2d finalPose, Distance tolerance) {
-        DriverStation.reportWarning("Pathfind command has been reached", false);
-        mapleADStar.setStartPosition(simulation.getActualPoseInSimulationWorld().getTranslation());
-        mapleADStar.setGoalPosition(finalPose.getTranslation());
+    protected Command pathfind(Pose2d targetPose) {
+        /// Set up the pathfinder
+        mapleADStar.setStartPosition(drivetrainSim.getActualPoseInSimulationWorld().getTranslation());
+        mapleADStar.setGoalPosition(targetPose.getTranslation());
         mapleADStar.runThread();
-        return (Commands.run(() -> {
-            // Check if near another opponent.
-//            for (SmartOpponent opponent : manager.getOpponents()) {
-//                if (opponent != this) {
-//                    if (nearPose(opponent.getPose(), tolerance)) {
-//                        mapleADStar.setDynamicObstacles(manager.getObstacles(id), simulation.getActualPoseInSimulationWorld().getTranslation());
-//                        mapleADStar.runThread();
-//                    }
-//                    break;
-//                }
-//            }
-
-            Pose2d currentPose = simulation.getActualPoseInSimulationWorld();
-            // Get waypoints
+        return run(() -> {
+            Pose2d currentPose = drivetrainSim.getActualPoseInSimulationWorld();
             List<Waypoint> waypoints = mapleADStar.currentWaypoints;
             Translation2d targetTranslation;
             Rotation2d targetRotation;
-            // If there's more waypoints, generate a new target.
+            /// If waypoints exist make the next one our target.
             if (!waypoints.isEmpty()) {
-                DriverStation.reportWarning("Waypoints Count: " + waypoints.size(), false);
                 targetTranslation = waypoints.get(0).anchor();
-                targetRotation = currentPose.getRotation().interpolate(finalPose.getRotation(), waypoints.size());
-                // If the target is close enough to the current pose, remove it.
-                if (nearPose(new Pose2d(targetTranslation, targetRotation), tolerance.times(2.0))) {
+                targetRotation = currentPose.getRotation().interpolate(targetPose.getRotation(), waypoints.size());
+                /// If we are close enough, remove it and move to the next waypoint.
+                if (currentPose.getTranslation().getDistance(targetTranslation) < config.chassis.driveToPoseTolerance.in(Meters)) {
                     waypoints.remove(0);
                 }
-            // Else there are no more waypoints, set the target to the final pose.
+                /// Else, we set our target to our desired final pose.
             } else {
-                targetTranslation = finalPose.getTranslation();
-                targetRotation = finalPose.getRotation();
+                targetTranslation = targetPose.getTranslation();
+                targetRotation = targetPose.getRotation();
             }
-            Pose2d targetPose = new Pose2d(targetTranslation, targetRotation);
-            PathPlannerTrajectoryState state = new PathPlannerTrajectoryState();
-            state.pose = targetPose;
-            // Reset controller for best results
-            driveController.reset(simulation.getActualPoseInSimulationWorld(), simulation.getActualSpeedsFieldRelative());
-            // Calculate field-centric speed to the next waypoint.
-            ChassisSpeeds speeds = driveController.calculateRobotRelativeSpeeds(
+            /// Create a {@link Pose2d} from our waypoint targets.
+            Pose2d waypointTarget = new Pose2d(targetTranslation, targetRotation);
+            /// Calculate our chassis speeds.
+            ChassisSpeeds speeds = driveController.calculate(
                     currentPose,
-                    state);
-            DriverStation.reportWarning("Robot-centric speed: " + speeds.toString(), false);
-            // Run the robot-centric speed
-            simulation.runChassisSpeeds(speeds, new Translation2d(), false, false);
-        }, this)
-        .until(() -> mapleADStar.currentWaypoints.isEmpty() && nearPose(finalPose, tolerance))
-        .finallyDo(() -> simulation.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false)));
-    }
-
-    public Pair<Pose2d, String> getTargetTask() {
-        return targetTask;
-    }
-
-    public Pose2d getPose() {
-        return simulation.getActualPoseInSimulationWorld();
+                    waypointTarget,
+                    config.chassis.maxLinearVelocity.in(MetersPerSecond),
+                    targetRotation);
+            drivetrainSim.runChassisSpeeds(speeds, new Translation2d(), false, false);
+        })
+                /// Once we have no more targets, finish the command.
+                .until(() -> {
+                    List<Waypoint> waypoints = mapleADStar.currentWaypoints;
+                    return waypoints.isEmpty() && nearPose(targetPose, config.chassis.driveToPoseTolerance.in(Meters));
+                })
+                .finallyDo(() -> drivetrainSim.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false));
     }
 
     /**
-     * returns false if simulation isn't present
+     * Gets a random pose from a map.
+     *
+     * @param poseMap The map to get a pose from.
+     * @return A random pose from the map.
      */
-    public boolean nearPose(Pose2d pose, Distance maxDistance) {
-            Translation2d robotTranslation = simulation.getActualPoseInSimulationWorld().getTranslation();
-            Translation2d goalTranslation = pose.getTranslation();
-            double distance = robotTranslation.getDistance(goalTranslation);
-            return distance <= maxDistance.in(Meters);
+    public Pose2d getRandomFromMap(Map<String, Pose2d> poseMap) {
+        return poseMap.values().toArray(new Pose2d[0])[new Random().nextInt(poseMap.size())];
     }
 
-    protected Command collect() {
-        return switch (targetTask.getSecond()) {
-            case "Station" -> Commands.none();
-            case "Floor Intake" -> Commands.none();
-            default -> Commands.runOnce(() -> {});
-        };
-    }
-
-    protected Command score() {
-        return switch (targetTask.getSecond()) {
-            case "Ball" -> feedShotCommand(null);
-            case "Cone" -> Commands.none();
-            default -> Commands.runOnce(() -> {});
-        };
-    }
-
-    protected Command feedShotCommand(GamePieceProjectile projectile) {
-        return runOnce(() -> {
-            SimulatedArena.getInstance()
-                    .addGamePieceProjectile(projectile);
-        });
+    public boolean nearPose(Pose2d pose, double tolerance) {
+        Translation2d thisTranslation = drivetrainSim.getActualPoseInSimulationWorld().getTranslation();
+        Translation2d otherTranslation = pose.getTranslation();
+        return thisTranslation.getDistance(otherTranslation) < tolerance;
     }
 
     /**
-     * The current state the opponent should be in. Some states may not be used.
+     * If robot is red, returns pose as is. If the robot is blue, it returns the flipped pose.
+     *
+     * @param pose The pose to flip.
+     * @return The flipped pose.
      */
-    public enum States {
+    public Pose2d ifShouldFlip(Pose2d pose) {
+        if (config.alliance == DriverStation.Alliance.Red) {
+            return pose;
+        } else {
+            return new Pose2d(
+                    FieldMirroringUtils.flip(pose.getTranslation()),
+                    FieldMirroringUtils.flip(pose.getRotation()));
+        }
+    }
+
+    protected static class ManipulatorSim extends SubsystemBase {
+        private final Map<String, org.ironmaple.simulation.IntakeSimulation> intakeSimulations;
+        private final Map<String, GamePieceProjectile> projectileSimulations;
+
         /**
-         * This state puts the {@link SmartOpponent} in it's queening pose.
+         * Creates a new manipulator simulation.
          */
-        STANDBY,
+        public ManipulatorSim()
+        {
+            this.intakeSimulations = new HashMap<>();
+            this.projectileSimulations = new HashMap<>();
+        }
+
         /**
-         * This state puts the robot into the starting pose.
+         * Adds an intake simulation to the manipulator simulation.
+         *
+         * @param name The name of the simulation.
+         * @param intakeSimulation The simulation to add.
+         * @return this, for chaining.
          */
-        STARTING,
+        public ManipulatorSim addIntakeSimulation(String name, IntakeSimulation intakeSimulation)
+        {
+            this.intakeSimulations.put(name, intakeSimulation);
+            return this;
+        }
+
         /**
-         * This state has the opponent decide where then goes to collect a game piece.
+         * Adds a projectile simulation to the manipulator simulation.
+         *
+         * @param name The name of the simulation.
+         * @param projectileSimulation The simulation to add.
+         * @return this, for chaining.
          */
-        COLLECT,
+        public ManipulatorSim addProjectileSimulation(String name, GamePieceProjectile projectileSimulation)
+        {
+            this.projectileSimulations.put(name, projectileSimulation);
+            return this;
+        }
+
         /**
-         * This state has the opponent decide where then goes and attempts to score a game piece.
-         * This typically ignores whether the opponent has properly collected a piece.
+         * Gets an intake simulation from the manipulator simulation.
+         *
+         * @param name The name of the simulation.
+         * @return The simulation.
          */
-        SCORE,
+        public IntakeSimulation getIntakeSimulation(String name)
+        {
+            return this.intakeSimulations.get(name);
+        }
+
         /**
-         * This state lets the opponent be controlled by a controller once setup.
+         * Gets a projectile simulation from the manipulator simulation.
+         *
+         * @param projectileName The name of the simulation.
+         * @return The simulation.
          */
-        JOYSTICK,
+        public GamePieceProjectile getProjectileSimulation(String projectileName)
+        {
+            return this.projectileSimulations.get(projectileName);
+        }
+
         /**
-         * This state has the opponent defend.
+         * Adds a projectile to the simulation.
+         *
+         * @param projectileName The name of the projectile simulation.
+         * @return a command to add the game piece projectile to the simulation.
          */
-        DEFEND
+        public Command feedShot(String projectileName)
+        {
+            return Commands.runOnce(() -> {
+                SimulatedArena.getInstance().addGamePieceProjectile(getProjectileSimulation(projectileName));
+            });
+        }
     }
 }
