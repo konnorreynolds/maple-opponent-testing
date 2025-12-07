@@ -12,6 +12,7 @@ import edu.wpi.first.wpilibj2.command.button.Trigger;
 import org.ironmaple.simulation.drivesims.*;
 import org.ironmaple.simulation.drivesims.configs.DriveTrainSimulationConfig;
 import org.ironmaple.simulation.drivesims.configs.SwerveModuleSimulationConfig;
+import org.ironmaple.simulation.opponentsim.SmartOpponent;
 
 import java.util.*;
 import java.util.function.Supplier;
@@ -30,7 +31,7 @@ public class SmartOpponentConfig {
     public String smartDashboardPath;
     protected final SendableChooser<Command> behaviorChooser;
     // Joystick Options
-    private Optional<Object> joystick = Optional.empty();
+    protected Optional<Object> joystick = Optional.empty();
     public double joystickdeadband = 0.1;
     // Auto Enable and Disable Opponent Support
     public boolean isAutoEnable;
@@ -47,6 +48,13 @@ public class SmartOpponentConfig {
     private final Map<String, Map<String, Pose2d>> scoringMap = new HashMap<>();
     // Map of possible collecting poses and types. For example, Map<"CollectStation", Map<"StationCenter", Pose2d>>
     private final Map<String, Map<String, Pose2d>> collectingMap = new HashMap<>();
+
+    /// Opponent Management
+    //
+    private boolean commandInProgress = false;
+    // Opponents current and last states.
+    public String currentState = "";
+    public String desiredState;
 
     /// Sets of required basic options
     private Set<BasicOptions> requiredBasicOptions;
@@ -175,6 +183,22 @@ public class SmartOpponentConfig {
     }
 
     /**
+     * Gets the optional joystick {@link Object}.
+     * Needs cast properly for use.
+     *
+     * @return the optional joystick {@link Object}.
+     */
+    public Object getJoystick()
+    {
+        if (joystick.isPresent())
+        {
+            return joystick.get();
+        }
+        DriverStation.reportError("Joystick not found, returning null. Joystick is: " + joystick, true);
+        return null;
+    }
+
+    /**
      * Sets the joystick deadband.
      *
      * @param deadband The joystick deadband.
@@ -219,6 +243,18 @@ public class SmartOpponentConfig {
     }
 
     /**
+     * Sets the current state of the robot.
+     * This waits it's turn patiently for the command to finish.
+     *
+     * @param state The state to set.
+     * @return this, for chaining.
+     */
+    public SmartOpponentConfig setState(String state) {
+        desiredState = state;
+        return this;
+    }
+
+    /**
      * Adds a state to the config.
      *
      * @param stateName The name of the state.
@@ -227,7 +263,13 @@ public class SmartOpponentConfig {
      */
     public SmartOpponentConfig addState(String stateName, Command stateCommand)
     {
-        states.put(stateName, stateCommand);
+        states.put(stateName, stateCommand.beforeStarting(() -> {
+            setState(stateName);
+            currentState =  stateName;
+            commandInProgress = true;
+        }).finallyDo(() -> {
+            commandInProgress = false;
+        }));
         return this;
     }
 
@@ -278,6 +320,18 @@ public class SmartOpponentConfig {
     {
         behavior.put(behaviorName, Pair.of(behaviorCommand, isDefault));
         return this;
+    }
+
+    /**
+     * Adds a non-default behavior to the config.
+     *
+     * @param behaviorName The name of the behavior.
+     * @param behaviorCommand The command to run when the behavior is entered.
+     * @return this, for chaining.
+     */
+    public SmartOpponentConfig addBehavior(String behaviorName, Command behaviorCommand)
+    {
+        return addBehavior(behaviorName, behaviorCommand, false);
     }
 
     /**
@@ -586,7 +640,7 @@ public class SmartOpponentConfig {
         /// Sets of required options set here.
         public Set<ChassisOptions> requiredChassisOptions;
         // Saved simulation for later use
-        public SelfControlledSwerveDriveSimulation driveTrainSim;
+        public SwerveModuleSimulation moduleSim;
         public RobotConfig pathplannerConfig;
 
         /**
@@ -698,7 +752,7 @@ public class SmartOpponentConfig {
          * @param initialPose the initial pose of the robot.
          * @return
          */
-        public SelfControlledSwerveDriveSimulation updateDriveTrainSim(Pose2d initialPose)
+        public SelfControlledSwerveDriveSimulation createDriveTrainSim(Pose2d initialPose)
         {
             // Add validation
             if (module == null) {
@@ -707,17 +761,15 @@ public class SmartOpponentConfig {
             if (module.driveMotor == null || module.steerMotor == null) {
                 throw new IllegalStateException("ModuleConfig has null motors! Drive: " + module.driveMotor + ", Steer: " + module.steerMotor);
             }
-
-            module.updateModuleSim();
-            this.driveTrainSim = new SelfControlledSwerveDriveSimulation(
+            this.moduleSim = module.createModuleSim();
+            return new SelfControlledSwerveDriveSimulation(
                     new SwerveDriveSimulation(DriveTrainSimulationConfig.Default()
                             .withTrackLengthTrackWidth(trackLength, trackWidth)
                             .withRobotMass(mass)
                             .withBumperSize(bumperLength, bumperWidth)
-                            .withSwerveModule(() -> module.moduleSim)
+                            .withSwerveModule(() -> moduleSim)
                             .withGyro(gyroSimulation)
                             , initialPose));
-            return this.driveTrainSim;
         }
 
         /**
@@ -1058,9 +1110,9 @@ public class SmartOpponentConfig {
          *
          * @return the new {@link SwerveModuleSimulation}.
          */
-        public SwerveModuleSimulation updateModuleSim()
+        public SwerveModuleSimulation createModuleSim()
         {
-            this.moduleSim = new SwerveModuleSimulation(new SwerveModuleSimulationConfig(
+            return new SwerveModuleSimulation(new SwerveModuleSimulationConfig(
                     driveMotor,
                     steerMotor,
                     driveGearRatio,
@@ -1070,7 +1122,6 @@ public class SmartOpponentConfig {
                     wheelRadius,
                     steerAngularInertia,
                     wheelCOF));
-            return this.moduleSim;
         }
 
         /**

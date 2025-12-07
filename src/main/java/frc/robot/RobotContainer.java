@@ -4,6 +4,7 @@
 
 package frc.robot;
 
+import com.pathplanner.lib.commands.PathfindingCommand;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -20,10 +21,13 @@ public class RobotContainer {
     // The robot's subsystems and commands are defined here...'
     private final CommandXboxController xboxController = new CommandXboxController(0);
     private final SwerveSubsystem drive = new SwerveSubsystem();
+    private final KitBot opponent;
 
   public RobotContainer()
   {
-      new KitBot("Kitbot", DriverStation.Alliance.Blue);
+      PathfindingCommand.warmupCommand().schedule();
+      opponent = new KitBot("Kitbot", DriverStation.Alliance.Blue)
+              .withXboxController(new CommandXboxController(1));
       configureBindings();
   }
 

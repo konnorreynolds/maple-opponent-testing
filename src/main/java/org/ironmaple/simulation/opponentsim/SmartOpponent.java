@@ -1,16 +1,15 @@
 package org.ironmaple.simulation.opponentsim;
 
+import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
+import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import com.pathplanner.lib.path.Waypoint;
-import edu.wpi.first.math.Pair;
-import edu.wpi.first.math.controller.HolonomicDriveController;
-import edu.wpi.first.math.controller.PIDController;
-import edu.wpi.first.math.controller.ProfiledPIDController;
+import com.pathplanner.lib.trajectory.PathPlannerTrajectoryState;
+import edu.wpi.first.math.filter.Debouncer;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
-import edu.wpi.first.math.trajectory.TrapezoidProfile;
 import edu.wpi.first.networktables.*;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -27,10 +26,12 @@ import org.ironmaple.simulation.opponentsim.pathfinding.MapleADStar;
 import org.ironmaple.utils.FieldMirroringUtils;
 
 import java.util.*;
+import java.util.function.Supplier;
 
 import static edu.wpi.first.units.Units.*;
 
-public abstract class SmartOpponent extends SubsystemBase {
+public abstract class SmartOpponent extends SubsystemBase
+{
     /// Publishers
     protected StringPublisher statePublisher;
     protected StructPublisher<Pose2d> posePublisher;
@@ -45,32 +46,35 @@ public abstract class SmartOpponent extends SubsystemBase {
     /// The pathplanner config
     protected RobotConfig pathplannerConfig;
     /// Pathplanner HolonomicDriveController
-    protected HolonomicDriveController driveController;
-    /// Opponent Management
-    // Opponents current and last states.
-    public String currentState;
-    public String lastState;
+    protected PPHolonomicDriveController driveController;
     // Pathfinding class cloned for modification.
     private final MapleADStar mapleADStar;
     // Behavior Chooser Publisher
-    private final StringPublisher selectedBehaviorPublisher;
+    private StringPublisher selectedBehaviorPublisher;
 
-    public SmartOpponent(SmartOpponentConfig config) {
+    public SmartOpponent(SmartOpponentConfig config)
+    {
         /// Create and verify config.
         this.config = config;
         config.validConfig(); // Throw an error if the config is invalid.
-        /// Initialize simulations
-        this.drivetrainSim = config.chassis.updateDriveTrainSim(config.initialPose);
-        this.pathplannerConfig = config.chassis.updatePathplannerConfig();
-        this.driveController = new HolonomicDriveController(
-                new PIDController(5, 0, 0),
-                new PIDController(5, 0, 0),
-                new ProfiledPIDController(5, 0, 0,
-                        new TrapezoidProfile.Constraints(
-                                config.chassis.maxLinearVelocity.in(MetersPerSecond),
-                                config.chassis.maxAngularVelocity.in(DegreesPerSecond))));
+        this.driveController = new PPHolonomicDriveController(
+                new PIDConstants(5),
+                new PIDConstants(5));
         // Cloned Pathfinder for use here.
         this.mapleADStar = new MapleADStar();
+        finalizeOpponent();
+    }
+
+    /**
+     * Used to update telemetry and more at the end to make sure there are no additional changes.
+     * Call again if you want to make a change to something major live.
+     * It's recommended to check first.
+     */
+    protected void finalizeOpponent()
+    {
+        /// Initialize simulations
+        this.drivetrainSim = config.chassis.createDriveTrainSim(config.queeningPose);
+        this.pathplannerConfig = config.chassis.updatePathplannerConfig();
         // Alliance string for telemetry.
         this.allianceString = DriverStation.Alliance.Blue.equals(config.alliance) ? "Blue Alliance/" : "Red Alliance/";
         // NetworkTable setup.
@@ -85,14 +89,14 @@ public abstract class SmartOpponent extends SubsystemBase {
                 .getStringTopic("selected")
                 .publish();
         /// Adds the required states to run the {@link org.ironmaple.simulation.opponentsim.SmartOpponent}.
-        config.getStates().put("Standby", standbyState());
-        config.getStates().put("Starting", startingState("Collect"));
-        config.getStates().put("Collect", collectState());
-        config.getStates().put("Score", scoreState());
+        config.addState("Standby", standbyState());
+        config.addState("Starting", startingState("Collect"));
+        config.addState("Collect", collectState());
+        config.addState("Score", scoreState());
         setState("Standby");
         /// Adds options to the behavior sendable chooser.
         config.addBehavior("Disabled", runState("Standby", true), true);
-        config.addBehavior("Enabled", runState("Starting", true), false);
+        config.addBehavior("Enabled", runState("Starting", true));
         // Update the chooser and then publish it.
         SmartDashboard.putData(config.smartDashboardPath + "SimulatedOpponents/Behaviors/" + allianceString
                 + config.name + "'s Behaviors", config.updateBehaviorChooser());
@@ -100,13 +104,14 @@ public abstract class SmartOpponent extends SubsystemBase {
         config.getBehaviorChooser().onChange(Command::schedule);
         /// Finally, add our simulation
         SimulatedArena.getInstance().addDriveTrainSimulation(drivetrainSim.getDriveTrainSimulation());
-        if (true) {
-            RobotModeTriggers.teleop().onTrue(setSelectedBehavior("Enabled"));
-            RobotModeTriggers.disabled().onTrue(setSelectedBehavior("Disabled"));
+        if (config.isAutoEnable) {
+            RobotModeTriggers.teleop().onTrue(runOnce(() -> config.getBehaviorChooser().getSelected().schedule()));
+            RobotModeTriggers.disabled().onTrue(runState("Standby", true));
         }
     }
 
-    public Command setSelectedBehavior(String behavior) {
+    protected Command setSelectedBehavior(String behavior)
+    {
         return runOnce(() -> selectedBehaviorPublisher.set(behavior));
     }
 
@@ -115,10 +120,10 @@ public abstract class SmartOpponent extends SubsystemBase {
      *
      * @return a Command that runs the state.
      */
-    protected Command standbyState() {
-        return runOnce(() -> drivetrainSim.runChassisSpeeds(
-                new ChassisSpeeds(), new Translation2d(), false, false))
-                .andThen(runOnce(() -> drivetrainSim.setSimulationWorldPose(config.initialPose)))
+    protected Command standbyState()
+    {
+        return runOnce(() -> drivetrainSim.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false))
+                .andThen(runOnce(() -> drivetrainSim.setSimulationWorldPose(config.queeningPose)))
                 .ignoringDisable(true);
     }
 
@@ -127,13 +132,13 @@ public abstract class SmartOpponent extends SubsystemBase {
      *
      * @return a Command that runs the state.
      */
-    protected Command startingState(String nextState) {
-        return runOnce(() -> drivetrainSim.runChassisSpeeds(
-                new ChassisSpeeds(), new Translation2d(), false, false))
+    protected Command startingState(String nextState)
+    {
+        return runOnce(() -> drivetrainSim.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false))
                 .andThen(runOnce(() -> drivetrainSim.setSimulationWorldPose(config.initialPose)))
                 .andThen(Commands.waitSeconds(0.25))
-                .andThen(() -> setState(nextState))
-                .ignoringDisable(true);
+                .finallyDo(() -> setState(nextState))
+                .ignoringDisable(config.isAutoEnable); // Only move to the field while disabled if autoEnable is off.
     }
 
     /**
@@ -150,15 +155,19 @@ public abstract class SmartOpponent extends SubsystemBase {
      */
     abstract protected Command scoreState();
 
+    Debouncer db = new Debouncer(1);
     @Override
-    public void simulationPeriodic() {
-        boolean commandInProgress = getCurrentCommand() != null && getCurrentCommand().isFinished();
-        if (!commandInProgress && !Objects.equals(lastState, currentState)) {
-            runState(currentState, true);
-            lastState = currentState;
+    public void simulationPeriodic()
+    {
+        boolean commandInProgress = getCurrentCommand() != null && !getCurrentCommand().isFinished();
+        DriverStation.reportError("Command in Progress: " + commandInProgress, false);
+        DriverStation.reportWarning("Current State: " + config.currentState, false);
+        DriverStation.reportWarning("Desired State: " + config.desiredState, false);
+        if (!commandInProgress && !Objects.equals(config.currentState, config.desiredState)) {
+            runState(config.desiredState, false).schedule();
         }
         drivetrainSim.periodic();
-        statePublisher.set(currentState);
+        statePublisher.set(config.currentState);
         posePublisher.set(drivetrainSim.getActualPoseInSimulationWorld());
     }
 
@@ -169,8 +178,8 @@ public abstract class SmartOpponent extends SubsystemBase {
      * @param state The state to set.
      * @return this, for chaining.
      */
-    public SmartOpponent setState(String state) {
-        currentState = state;
+    protected SmartOpponent setState(String state) {
+         config.desiredState = state;
         return this;
     }
 
@@ -181,21 +190,25 @@ public abstract class SmartOpponent extends SubsystemBase {
      * @param forceState Whether to force the state to run even if it is already running.
      * @return The command to run the state.
      */
-    public Command runState(String state, boolean forceState) {
-        boolean commandInProgress = getCurrentCommand() != null && getCurrentCommand().isFinished();
-        if (!forceState) {
-            // If already in the state or a command is in progress, return nothing.
-            if (currentState.equals(state) || commandInProgress) {
-                setState(state); // Make state wait for command to finish.
-                return Commands.none();
-            }
-        } else {
+    protected Command runState(String state, boolean forceState) {
+        /// If forceState cancel any commands.
+        if (forceState) {
             if (getCurrentCommand() != null) {
                 getCurrentCommand().cancel();
             }
+        } else
+        { /// Don't force the state. If there's a command running, wait.
+            // If already in the state or a command is in progress, return nothing.
+            if (config.currentState.equals(state)
+                    || getCurrentCommand() != null
+                    || (getCurrentCommand() != null  && !getCurrentCommand().isFinished())
+                    && (!RobotModeTriggers.disabled().getAsBoolean() && config.isAutoEnable)) {
+                setState(state); // Make state wait for command to finish.
+                return Commands.none();
+            }
         }
-        Command desiredState = config.getStates().get(state);
-        return Objects.requireNonNullElseGet(desiredState, Commands::none);
+        /// If nothing is in the way, schedule our state.
+        return config.getStates().get(state);
     }
 
     /**
@@ -229,12 +242,13 @@ public abstract class SmartOpponent extends SubsystemBase {
             }
             /// Create a {@link Pose2d} from our waypoint targets.
             Pose2d waypointTarget = new Pose2d(targetTranslation, targetRotation);
+            /// Create a desired state
+            PathPlannerTrajectoryState state = new PathPlannerTrajectoryState();
+            state.pose = waypointTarget;
             /// Calculate our chassis speeds.
-            ChassisSpeeds speeds = driveController.calculate(
+            ChassisSpeeds speeds = driveController.calculateRobotRelativeSpeeds(
                     currentPose,
-                    waypointTarget,
-                    config.chassis.maxLinearVelocity.in(MetersPerSecond),
-                    targetRotation);
+                    state);
             drivetrainSim.runChassisSpeeds(speeds, new Translation2d(), false, false);
         })
                 /// Once we have no more targets, finish the command.
@@ -246,12 +260,31 @@ public abstract class SmartOpponent extends SubsystemBase {
     }
 
     /**
+     * A {@link Command} to drive the {@link SmartOpponent}.
+     * Meant to be used for joystick drives.
+     *
+     * @param chassisSpeeds speeds supplier to run the robot.
+     * @return {@link Command} to drive the {@link SmartOpponent}.
+     */
+    protected Command drive(Supplier<ChassisSpeeds> chassisSpeeds, boolean fieldCentric) {
+        final Supplier<ChassisSpeeds> updatedSpeed = () ->
+                ChassisSpeeds.fromFieldRelativeSpeeds(
+                        chassisSpeeds.get(),
+                        config.alliance.equals(DriverStation.Alliance.Blue)
+                        ? Rotation2d.kZero
+                                : Rotation2d.k180deg);
+        return run(() -> {
+            DriverStation.reportError("DRIVE FORWARDING", false);
+            drivetrainSim.runChassisSpeeds(updatedSpeed.get(), new Translation2d(), fieldCentric, false);});
+    }
+
+    /**
      * Gets a random pose from a map.
      *
      * @param poseMap The map to get a pose from.
      * @return A random pose from the map.
      */
-    public Pose2d getRandomFromMap(Map<String, Pose2d> poseMap) {
+    protected Pose2d getRandomFromMap(Map<String, Pose2d> poseMap) {
         return poseMap.values().toArray(new Pose2d[0])[new Random().nextInt(poseMap.size())];
     }
 
@@ -267,7 +300,7 @@ public abstract class SmartOpponent extends SubsystemBase {
      * @param pose The pose to flip.
      * @return The flipped pose.
      */
-    public Pose2d ifShouldFlip(Pose2d pose) {
+    protected Pose2d ifShouldFlip(Pose2d pose) {
         if (config.alliance == DriverStation.Alliance.Red) {
             return pose;
         } else {

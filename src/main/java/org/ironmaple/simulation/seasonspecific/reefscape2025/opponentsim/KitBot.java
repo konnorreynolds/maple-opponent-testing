@@ -1,12 +1,15 @@
 package org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim;
 
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Transform2d;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import org.ironmaple.simulation.IntakeSimulation;
 import org.ironmaple.simulation.opponentsim.SmartOpponent;
 import org.ironmaple.simulation.opponentsim.configs.SmartOpponentConfig;
@@ -41,7 +44,7 @@ public class KitBot extends SmartOpponent {
                 .addIntakeSimulation("Intake",
                         IntakeSimulation.InTheFrameIntake(
                                 "Coral",
-                                config.chassis.driveTrainSim.getDriveTrainSimulation(),
+                                drivetrainSim.getDriveTrainSimulation(),
                                 Inches.of(20),
                                 IntakeSimulation.IntakeSide.BACK,
                                 1))
@@ -79,5 +82,29 @@ public class KitBot extends SmartOpponent {
         return pathfind(getRandomFromMap(config.getScoringMap())).withTimeout(10)
                 .andThen(() -> manipulatorSim.feedShot("Coral"))
                 .finallyDo(() -> setState("Collect"));
+    }
+
+    public KitBot withXboxController(CommandXboxController xboxController) {
+        config.withJoystick(xboxController);
+        config.addState("Joystick", joystickState());
+        config.addBehavior("Player", startingState("Joystick").andThen(startingState("Joystick").ignoringDisable(true)));
+        config.updateBehaviorChooser();
+        return this;
+    }
+
+    /**
+     * The joystick states to run.
+     * Should be inaccessible when not set.
+     *
+     * @return
+     */
+    private Command joystickState() {
+        final CommandXboxController xbox = ((CommandXboxController) config.getJoystick());
+        return drive(() ->
+                        new ChassisSpeeds(
+                                MathUtil.applyDeadband(xbox.getLeftX() * config.chassis.maxLinearVelocity.in(MetersPerSecond), config.joystickdeadband),
+                                MathUtil.applyDeadband(xbox.getLeftY() * config.chassis.maxLinearVelocity.in(MetersPerSecond), config.joystickdeadband),
+                                MathUtil.applyDeadband(xbox.getRightX() * config.chassis.maxAngularVelocity.in(RadiansPerSecond), config.joystickdeadband)),
+                        true);
     }
 }
