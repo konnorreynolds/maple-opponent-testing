@@ -64,17 +64,7 @@ public abstract class SmartOpponent extends SubsystemBase
         // Cloned Pathfinder for use here.
         this.mapleADStar = new MapleADStar();
         // Preset an empty manipulator
-        this.manipulatorSim = new OpponentManipulatorSim();
-        finalizeOpponent();
-    }
-
-    /**
-     * Used to update telemetry and more at the end to make sure there are no additional changes.
-     * Call again if you want to make a change to something major live.
-     * It's recommended to check first.
-     */
-    protected void finalizeOpponent()
-    {
+        this.manipulatorSim = new OpponentManipulatorSim(this);
         /// Initialize simulations
         this.drivetrainSim = config.chassis.createDriveTrainSim(config.queeningPose);
         this.pathplannerConfig = config.chassis.updatePathplannerConfig();
@@ -109,7 +99,7 @@ public abstract class SmartOpponent extends SubsystemBase
         SimulatedArena.getInstance().addDriveTrainSimulation(drivetrainSim.getDriveTrainSimulation());
         if (config.isAutoEnable) {
             RobotModeTriggers.teleop().onTrue(Commands.runOnce(() -> config.getBehaviorChooser().getSelected().schedule()));
-            RobotModeTriggers.disabled().onTrue(Commands.runOnce(() -> runState("Disabled", true).schedule()));
+            RobotModeTriggers.disabled().onTrue(standbyState());
         }
     }
 
@@ -225,10 +215,6 @@ public abstract class SmartOpponent extends SubsystemBase
             moduleStates.append(pose.toString());
             moduleStates.append(", ");
         }
-        DriverStation.reportError(moduleStates.toString(), false);
-        DriverStation.reportError("Actual Rotation: " + drivetrainSim.getActualPoseInSimulationWorld().getRotation().toString(), false);
-        DriverStation.reportError("Odom Rotation: " + drivetrainSim.getOdometryEstimatedPose().getRotation().toString(), false);
-        DriverStation.reportError("Gyro Reading: " + drivetrainSim.getDriveTrainSimulation().getGyroSimulation().getGyroReading().toString(), false);
     }
 
     /**
@@ -315,10 +301,7 @@ public abstract class SmartOpponent extends SubsystemBase
             ChassisSpeeds speeds = driveController.calculateRobotRelativeSpeeds(
                     currentPose,
                     state);
-            DriverStation.reportWarning(String.format("Speeds: vx=%.2f vy=%.2f omega=%.2f",
-                    speeds.vxMetersPerSecond, speeds.vyMetersPerSecond, speeds.omegaRadiansPerSecond), false);
             drivetrainSim.runChassisSpeeds(speeds, new Translation2d(), false, false);
-            DriverStation.reportError("Waypoints: " + waypointTarget + "   Count: " + waypoints.size(), false);
         })
                 /// Once we have no more targets, finish the command.
                 .until(() -> {

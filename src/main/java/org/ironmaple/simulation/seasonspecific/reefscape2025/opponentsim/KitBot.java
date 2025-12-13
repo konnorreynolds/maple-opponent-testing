@@ -28,7 +28,7 @@ public class KitBot extends SmartOpponent {
                 .withQueeningPose(new Pose2d(-6, 0, new Rotation2d()))
                 .withChassisConfig(SmartOpponentConfig.ChassisConfig.Presets.SimpleSquareChassis.getConfig())
                 .addScoringPose("Reef", "SouthLeft", new Pose2d( // South Center Face
-                        Units.inchesToMeters(144.003-28),
+                        Units.inchesToMeters(144.003),
                         Units.inchesToMeters(158.500),
                         Rotation2d.fromDegrees(0))
                         .plus(new Transform2d(
@@ -49,14 +49,17 @@ public class KitBot extends SmartOpponent {
                                 IntakeSimulation.IntakeSide.BACK,
                                 1))
                 .addProjectileSimulation("Coral",
-                        new ReefscapeCoralOnFly(
+                        () -> new ReefscapeCoralOnFly(
                                 drivetrainSim.getActualPoseInSimulationWorld().getTranslation(),
-                                new Translation2d(Inches.of(0), Inches.of(20)),
-                                drivetrainSim.getActualSpeedsFieldRelative(),
-                                drivetrainSim.getActualPoseInSimulationWorld().getRotation(),
-                                Inches.of(12),
-                                InchesPerSecond.of(12),
-                                Degrees.of(-15)));
+                                new Translation2d(Inches.of(0), Inches.of(-18)), // Shooter on bot
+                                drivetrainSim.getActualSpeedsFieldRelative()
+                                        .plus(new ChassisSpeeds(1.25, 0, 0)), // Added chassis speeds to change coral velocity,
+                                                                                                                                // this is because we want a horizontal score
+                                drivetrainSim.getActualPoseInSimulationWorld().getRotation()
+                                        .rotateBy(Rotation2d.kCCW_90deg), // Rotated by 90 degrees for horizontal shooter.
+                                Inches.of(30), // Shooter Height
+                                MetersPerSecond.of(0), // Initial piece speed
+                                Degrees.of(0))); // Shooter angle
     }
 
     /**
@@ -81,7 +84,9 @@ public class KitBot extends SmartOpponent {
     @Override
     protected Command scoreState() {
         return pathfind(getRandomFromMap(config.getScoringMap()), Seconds.of(7))
+                .andThen(Commands.waitSeconds(0.2))
                 .andThen(manipulatorSim.score("Coral"))
+                .andThen(Commands.waitSeconds(0.5))
                 .finallyDo(() -> setState("Collect"))
                 .withTimeout(10);
     }

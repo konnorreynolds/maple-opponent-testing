@@ -1,5 +1,6 @@
 package org.ironmaple.simulation.opponentsim;
 
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import org.ironmaple.simulation.IntakeSimulation;
@@ -8,18 +9,41 @@ import org.ironmaple.simulation.gamepieces.GamePieceProjectile;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 
 public class OpponentManipulatorSim extends SubsystemBase {
+    /// Simulation Maps of saved manipulators
     private final Map<String, IntakeSimulation> intakeSimulations;
-    private final Map<String, GamePieceProjectile> projectileSimulations;
+    private final Map<String, Supplier<GamePieceProjectile>> projectileSimulations;
+    /// Opponent pose supplier
+    Supplier<Pose2d> opponentPose;
 
     /**
      * Creates a new manipulator simulation.
      */
-    public OpponentManipulatorSim()
+    public OpponentManipulatorSim(SmartOpponent opponent)
     {
         this.intakeSimulations = new HashMap<>();
         this.projectileSimulations = new HashMap<>();
+        this.opponentPose = () -> opponent.drivetrainSim.getActualPoseInSimulationWorld();
+    }
+
+    /**
+     * The Map of {@link IntakeSimulation} types.
+     *
+     * @return a Map of {@link IntakeSimulation} types.
+     */
+    public Map<String, IntakeSimulation> getIntakeSimulations() {
+        return intakeSimulations;
+    }
+
+    /**
+     * The Map of the {@link GamePieceProjectile} types.
+     *
+     * @return a Map of the {@link GamePieceProjectile} types.
+     */
+    public Map<String, Supplier<GamePieceProjectile>> getProjectileSimulations() {
+        return projectileSimulations;
     }
 
     /**
@@ -42,7 +66,7 @@ public class OpponentManipulatorSim extends SubsystemBase {
      * @param projectileSimulation The simulation to add.
      * @return this, for chaining.
      */
-    public OpponentManipulatorSim addProjectileSimulation(String projectileName, GamePieceProjectile projectileSimulation)
+    public OpponentManipulatorSim addProjectileSimulation(String projectileName, Supplier<GamePieceProjectile> projectileSimulation)
     {
         this.projectileSimulations.put(projectileName, projectileSimulation);
         return this;
@@ -65,7 +89,7 @@ public class OpponentManipulatorSim extends SubsystemBase {
      * @param projectileName The name of the simulation.
      * @return The simulation.
      */
-    public GamePieceProjectile getProjectileSimulation(String projectileName)
+    public Supplier<GamePieceProjectile> getProjectileSimulation(String projectileName)
     {
         return this.projectileSimulations.get(projectileName);
     }
@@ -103,7 +127,8 @@ public class OpponentManipulatorSim extends SubsystemBase {
      */
     public Command score(String projectileName)
     {
-        return runOnce(() -> SimulatedArena.getInstance().addGamePieceProjectile(getProjectileSimulation(projectileName)));
+        return runOnce(() -> SimulatedArena.getInstance().addGamePieceProjectile(
+                getProjectileSimulation(projectileName).get()));
     }
 
     /**
