@@ -9,6 +9,7 @@ import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import org.ironmaple.simulation.IntakeSimulation;
 import org.ironmaple.simulation.opponentsim.SmartOpponent;
@@ -18,7 +19,6 @@ import org.ironmaple.simulation.seasonspecific.reefscape2025.ReefscapeCoralOnFly
 import static edu.wpi.first.units.Units.*;
 
 public class KitBot extends SmartOpponent {
-
     public KitBot(String name, DriverStation.Alliance alliance) {
         /// All Options should be set in the constructor.
         super(new SmartOpponentConfig()
@@ -36,11 +36,11 @@ public class KitBot extends SmartOpponent {
                                 Units.inchesToMeters(13 / 2.0), // Offset to the left branch.
                                 Rotation2d.kZero)))
                 .addCollectingPose("Station", "LeftCenter", new Pose2d(
-                        Units.inchesToMeters(33.526),
+                        Units.inchesToMeters(33.526 + 20),
                         Units.inchesToMeters(291.176),
                         Rotation2d.fromDegrees(125.989)))
                 .withAutoEnable());
-        this.manipulatorSim = new ManipulatorSim()
+        this.manipulatorSim
                 .addIntakeSimulation("Intake",
                         IntakeSimulation.InTheFrameIntake(
                                 "Coral",
@@ -66,10 +66,11 @@ public class KitBot extends SmartOpponent {
      */
     @Override
     protected Command collectState() {
-        return pathfind(getRandomFromMap(config.getCollectingMap())).withTimeout(10)
-                .andThen(() -> manipulatorSim.getIntakeSimulation("Intake").startIntake()).withTimeout(0.5)
-                .finallyDo(() -> manipulatorSim.getIntakeSimulation("Intake").stopIntake()).withTimeout(0.1)
-                .finallyDo(() -> setState("Score"));
+        return pathfind(getRandomFromMap(config.getCollectingMap()), Seconds.of(7))
+                .andThen(manipulatorSim.intake("Intake")
+                        .withDeadline(Commands.waitSeconds(1)))
+                .finallyDo(() -> setState("Score"))
+                .withTimeout(10);
     }
 
     /**
@@ -79,9 +80,10 @@ public class KitBot extends SmartOpponent {
      */
     @Override
     protected Command scoreState() {
-        return pathfind(getRandomFromMap(config.getScoringMap())).withTimeout(10)
-                .andThen(() -> manipulatorSim.feedShot("Coral"))
-                .finallyDo(() -> setState("Collect"));
+        return pathfind(getRandomFromMap(config.getScoringMap()), Seconds.of(7))
+                .andThen(manipulatorSim.score("Coral"))
+                .finallyDo(() -> setState("Collect"))
+                .withTimeout(10);
     }
 
     public KitBot withXboxController(CommandXboxController xboxController) {
@@ -93,18 +95,18 @@ public class KitBot extends SmartOpponent {
     }
 
     /**
-     * The joystick states to run.
+     * The joystick state to run.
      * Should be inaccessible when not set.
      *
-     * @return
+     * @return the joystick state to run.
      */
     private Command joystickState() {
         final CommandXboxController xbox = ((CommandXboxController) config.getJoystick());
         return drive(() ->
                         new ChassisSpeeds(
-                                MathUtil.applyDeadband(xbox.getLeftX() * config.chassis.maxLinearVelocity.in(MetersPerSecond), config.joystickdeadband),
-                                MathUtil.applyDeadband(xbox.getLeftY() * config.chassis.maxLinearVelocity.in(MetersPerSecond), config.joystickdeadband),
-                                MathUtil.applyDeadband(xbox.getRightX() * config.chassis.maxAngularVelocity.in(RadiansPerSecond), config.joystickdeadband)),
-                        true);
+                                MathUtil.applyDeadband(xbox.getLeftY() * -config.chassis.maxLinearVelocity.in(MetersPerSecond), config.joystickdeadband),
+                                MathUtil.applyDeadband(xbox.getLeftX() * -config.chassis.maxLinearVelocity.in(MetersPerSecond), config.joystickdeadband),
+                                MathUtil.applyDeadband(xbox.getRightX() * -config.chassis.maxAngularVelocity.in(RadiansPerSecond), config.joystickdeadband)),
+                        false);
     }
 }

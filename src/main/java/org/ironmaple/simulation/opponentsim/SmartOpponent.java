@@ -10,17 +10,18 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.networktables.*;
+import edu.wpi.first.units.measure.Distance;
+import edu.wpi.first.units.measure.Time;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
-import org.ironmaple.simulation.IntakeSimulation;
 import org.ironmaple.simulation.SimulatedArena;
 import org.ironmaple.simulation.drivesims.SelfControlledSwerveDriveSimulation;
-import org.ironmaple.simulation.gamepieces.GamePieceProjectile;
 import org.ironmaple.simulation.opponentsim.configs.SmartOpponentConfig;
 import org.ironmaple.simulation.opponentsim.pathfinding.MapleADStar;
 import org.ironmaple.utils.FieldMirroringUtils;
@@ -39,10 +40,10 @@ public abstract class SmartOpponent extends SubsystemBase
     protected String allianceString;
     /// The SmartOpponentConfig to use.
     protected SmartOpponentConfig config;
-    /// The manipulator simulation.
-    protected ManipulatorSim manipulatorSim;
     /// The drivetrain simulation.
     protected SelfControlledSwerveDriveSimulation drivetrainSim;
+    /// The Manipulator Sim
+    protected OpponentManipulatorSim manipulatorSim;
     /// The pathplanner config
     protected RobotConfig pathplannerConfig;
     /// Pathplanner HolonomicDriveController
@@ -56,12 +57,14 @@ public abstract class SmartOpponent extends SubsystemBase
     {
         /// Create and verify config.
         this.config = config;
-        config.validConfig(); // Throw an error if the config is invalid.
+        config.validateConfigs(); // Throw an error if the config is invalid.
         this.driveController = new PPHolonomicDriveController(
                 new PIDConstants(5),
                 new PIDConstants(5));
         // Cloned Pathfinder for use here.
         this.mapleADStar = new MapleADStar();
+        // Preset an empty manipulator
+        this.manipulatorSim = new OpponentManipulatorSim();
         finalizeOpponent();
     }
 
@@ -85,7 +88,7 @@ public abstract class SmartOpponent extends SubsystemBase
                 .getStructTopic(config.telemetryPath + "SimulatedOpponents/Poses/" + allianceString
                         + config.name + "'s Pose2d", Pose2d.struct).publish();
         this.selectedBehaviorPublisher = NetworkTableInstance.getDefault()
-                .getTable(config.smartDashboardPath + "SimulatedOpponents/Behaviors/" + allianceString + config.name + "'s Behaviors")
+                .getTable(config.telemetryPath + "SimulatedOpponents/Behaviors/" + allianceString + config.name + "'s Behaviors")
                 .getStringTopic("selected")
                 .publish();
         /// Adds the required states to run the {@link org.ironmaple.simulation.opponentsim.SmartOpponent}.
@@ -105,11 +108,19 @@ public abstract class SmartOpponent extends SubsystemBase
         /// Finally, add our simulation
         SimulatedArena.getInstance().addDriveTrainSimulation(drivetrainSim.getDriveTrainSimulation());
         if (config.isAutoEnable) {
-            RobotModeTriggers.teleop().onTrue(runOnce(() -> config.getBehaviorChooser().getSelected().schedule()));
-            RobotModeTriggers.disabled().onTrue(runState("Standby", true));
+            RobotModeTriggers.teleop().onTrue(Commands.runOnce(() -> config.getBehaviorChooser().getSelected().schedule()));
+            RobotModeTriggers.disabled().onTrue(Commands.runOnce(() -> runState("Disabled", true).schedule()));
         }
     }
 
+    /**
+     * <p>Updates the selected behavior {@link edu.wpi.first.wpilibj.smartdashboard.SendableChooser<Command>},
+     * as if it was changed from the dashboard.</p>
+     * This is done with a {@link StringPublisher} pointing to the {@link edu.wpi.first.wpilibj.smartdashboard.SendableChooser} selected string.
+     *
+     * @param behavior which option to select.
+     * @return a command that updated the selected behavior.
+     */
     protected Command setSelectedBehavior(String behavior)
     {
         return runOnce(() -> selectedBehaviorPublisher.set(behavior));
@@ -144,36 +155,85 @@ public abstract class SmartOpponent extends SubsystemBase
     /**
      * The collect state to run.
      *
+     * <p><h1>Commands should be structured like below to prevent InstantCommands,
+     * causing the opponent to cycle states without the command finishing.</h1></p>
+     * <p></p>
+     * <p><h1> Good </h1></p>
+     * <pre><code>
+     *     pathfind(getRandomFromMap(config.getPoseMap).withTimeout(7)) /// Go to element
+     *     .andThen(run(() -> Runnable).withTimeout(0.5)) /// Run intake
+     *     .andThen(runOnce(() -> Runnable)) /// Stop Intake
+     *     .andThen(Commands.waitSeconds(0.5)) /// Wait before continuing
+     *     .finallyDo(() -> setState("Score")); /// Now cycle to next state.
+     * </code></pre>
+     * <p></p>
+     * <p><h1> Bad </h1></p>
+     *<pre><code>
+     *     pathfind
+     *     /// This adds the command then adds the timeout to the entire command.
+     *     .andThen(run(() -> Runnable)).withTimeout(1)
+     *     /// This results in an InstantCommand ending instantly.
+     *     .andThen(() -> Runnable);
+     *</code></pre>
+     *
      * @return a runnable that runs the state.
      */
     abstract protected Command collectState();
 
     /**
-     * The score state to run.
+     * <p>The score state to run.</p>
+     *
+     * <p><h1>Commands should be structured like below to prevent InstantCommands,
+     * causing the opponent to cycle states without the command finishing.</h1></p>
+     * <p></p>
+     * <p><h1> Good </h1></p>
+     * <pre><code>
+     *     pathfind(getRandomFromMap(config.getPoseMap)).withTimeout(7) // Go to element
+     *     .andThen(manipulatorSim.intake("Intake").withTimeout(0.5)) // Run intake
+     *     .andThen(manipulatorSim.intake("Intake") // Run intake
+     *              .withDeadline(Commands.waitSeconds(1)) // Add deadline timer to only intake()
+     *     .andThen(runOnce(() -> Runnable)) // Stop something
+     *     .andThen(Commands.waitSeconds(0.5)) // Wait before continuing
+     *     .finallyDo(() -> setState("Score")); // Now cycle to next state.
+     * </code></pre>
+     * <p></p>
+     * <p><h1> Bad </h1></p>
+     *<pre><code>
+     *     pathfind
+     *     /// This adds the command then adds the timeout to the entire command sequence.
+     *     .andThen(run(() -> Runnable)).withTimeout(1)
+     *     /// This results in an InstantCommand ending instantly.
+     *     .andThen(() -> Runnable);
+     *</code></pre>
      *
      * @return a runnable that runs the state.
      */
     abstract protected Command scoreState();
 
-    Debouncer db = new Debouncer(1);
     @Override
     public void simulationPeriodic()
     {
         boolean commandInProgress = getCurrentCommand() != null && !getCurrentCommand().isFinished();
-        DriverStation.reportError("Command in Progress: " + commandInProgress, false);
-        DriverStation.reportWarning("Current State: " + config.currentState, false);
-        DriverStation.reportWarning("Desired State: " + config.desiredState, false);
-        if (!commandInProgress && !Objects.equals(config.currentState, config.desiredState)) {
+        if (!commandInProgress && !Objects.equals("Standby", config.desiredState)) {
             runState(config.desiredState, false).schedule();
         }
         drivetrainSim.periodic();
         statePublisher.set(config.currentState);
         posePublisher.set(drivetrainSim.getActualPoseInSimulationWorld());
+        StringBuilder moduleStates = new StringBuilder("Module States:");
+        for (SwerveModulePosition pose : drivetrainSim.getLatestModulePositions()) {
+            moduleStates.append(pose.toString());
+            moduleStates.append(", ");
+        }
+        DriverStation.reportError(moduleStates.toString(), false);
+        DriverStation.reportError("Actual Rotation: " + drivetrainSim.getActualPoseInSimulationWorld().getRotation().toString(), false);
+        DriverStation.reportError("Odom Rotation: " + drivetrainSim.getOdometryEstimatedPose().getRotation().toString(), false);
+        DriverStation.reportError("Gyro Reading: " + drivetrainSim.getDriveTrainSimulation().getGyroSimulation().getGyroReading().toString(), false);
     }
 
     /**
      * Sets the current state of the robot.
-     * This waits it's turn patiently for the command to finish.
+     * This waits its turn patiently for the command to finish.
      *
      * @param state The state to set.
      * @return this, for chaining.
@@ -207,7 +267,7 @@ public abstract class SmartOpponent extends SubsystemBase
                 return Commands.none();
             }
         }
-        /// If nothing is in the way, schedule our state.
+        /// If nothing is in the way, get our state.
         return config.getStates().get(state);
     }
 
@@ -217,20 +277,26 @@ public abstract class SmartOpponent extends SubsystemBase
      * @param targetPose The target pose.
      * @return A command to pathfind to the target pose.
      */
-    protected Command pathfind(Pose2d targetPose) {
+    protected Command pathfind(Pose2d targetPose, Time timeout) {
+        // Store initial waypoint count for rotation interpolation. As an array so it can be accessed atomically.
+        final int[] initialWaypointCount = {0};
         /// Set up the pathfinder
         mapleADStar.setStartPosition(drivetrainSim.getActualPoseInSimulationWorld().getTranslation());
         mapleADStar.setGoalPosition(targetPose.getTranslation());
         mapleADStar.runThread();
-        return run(() -> {
+        return Commands.defer(() ->
+                        Commands.run(() -> {
             Pose2d currentPose = drivetrainSim.getActualPoseInSimulationWorld();
             List<Waypoint> waypoints = mapleADStar.currentWaypoints;
             Translation2d targetTranslation;
             Rotation2d targetRotation;
-            /// If waypoints exist make the next one our target.
+            /// If waypoints exist, make the next one our target.
             if (!waypoints.isEmpty()) {
                 targetTranslation = waypoints.get(0).anchor();
-                targetRotation = currentPose.getRotation().interpolate(targetPose.getRotation(), waypoints.size());
+                // Interpolate rotation based on progress (0.0 to 1.0)
+                targetRotation = currentPose.getRotation().interpolate(
+                        targetPose.getRotation(),
+                        (double) initialWaypointCount[0] / waypoints.size());
                 /// If we are close enough, remove it and move to the next waypoint.
                 if (currentPose.getTranslation().getDistance(targetTranslation) < config.chassis.driveToPoseTolerance.in(Meters)) {
                     waypoints.remove(0);
@@ -249,14 +315,19 @@ public abstract class SmartOpponent extends SubsystemBase
             ChassisSpeeds speeds = driveController.calculateRobotRelativeSpeeds(
                     currentPose,
                     state);
+            DriverStation.reportWarning(String.format("Speeds: vx=%.2f vy=%.2f omega=%.2f",
+                    speeds.vxMetersPerSecond, speeds.vyMetersPerSecond, speeds.omegaRadiansPerSecond), false);
             drivetrainSim.runChassisSpeeds(speeds, new Translation2d(), false, false);
+            DriverStation.reportError("Waypoints: " + waypointTarget + "   Count: " + waypoints.size(), false);
         })
                 /// Once we have no more targets, finish the command.
                 .until(() -> {
                     List<Waypoint> waypoints = mapleADStar.currentWaypoints;
-                    return waypoints.isEmpty() && nearPose(targetPose, config.chassis.driveToPoseTolerance.in(Meters));
+                    return waypoints.isEmpty() && nearPose(targetPose, config.chassis.driveToPoseTolerance);
                 })
-                .finallyDo(() -> drivetrainSim.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false));
+                .finallyDo(() -> drivetrainSim.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false)), Set.of(this)) /// Stop moving when done.
+                .beforeStarting(() -> initialWaypointCount[0] = mapleADStar.currentWaypoints.size()) /// Set the waypoint count when starting.
+                .withTimeout(timeout); /// Set a timeout, usually 7sec is good.
     }
 
     /**
@@ -267,15 +338,20 @@ public abstract class SmartOpponent extends SubsystemBase
      * @return {@link Command} to drive the {@link SmartOpponent}.
      */
     protected Command drive(Supplier<ChassisSpeeds> chassisSpeeds, boolean fieldCentric) {
-        final Supplier<ChassisSpeeds> updatedSpeed = () ->
-                ChassisSpeeds.fromFieldRelativeSpeeds(
-                        chassisSpeeds.get(),
-                        config.alliance.equals(DriverStation.Alliance.Blue)
-                        ? Rotation2d.kZero
-                                : Rotation2d.k180deg);
-        return run(() -> {
-            DriverStation.reportError("DRIVE FORWARDING", false);
-            drivetrainSim.runChassisSpeeds(updatedSpeed.get(), new Translation2d(), fieldCentric, false);});
+        if (fieldCentric) {
+            return run(() -> {
+                // Blue alliance faces 180°, Red faces 0°
+                Rotation2d driverFacing = config.alliance.equals(DriverStation.Alliance.Blue)
+                        ? Rotation2d.k180deg : Rotation2d.kZero;
+
+                // Convert to field-centric and run
+                ChassisSpeeds fieldSpeeds = ChassisSpeeds.fromRobotRelativeSpeeds(chassisSpeeds.get(), driverFacing);
+                drivetrainSim.runChassisSpeeds(fieldSpeeds, new Translation2d(), true, true);
+            });
+        }
+
+        // Robot-relative
+        return run(() -> drivetrainSim.runChassisSpeeds(chassisSpeeds.get(), new Translation2d(), false, false));
     }
 
     /**
@@ -285,13 +361,15 @@ public abstract class SmartOpponent extends SubsystemBase
      * @return A random pose from the map.
      */
     protected Pose2d getRandomFromMap(Map<String, Pose2d> poseMap) {
-        return poseMap.values().toArray(new Pose2d[0])[new Random().nextInt(poseMap.size())];
+        var value = poseMap.values().toArray(new Pose2d[0])[new Random().nextInt(poseMap.size())];
+        SmartDashboard.putString("Random From Map", value.toString());
+        return value;
     }
 
-    public boolean nearPose(Pose2d pose, double tolerance) {
+    public boolean nearPose(Pose2d pose, Distance tolerance) {
         Translation2d thisTranslation = drivetrainSim.getActualPoseInSimulationWorld().getTranslation();
         Translation2d otherTranslation = pose.getTranslation();
-        return thisTranslation.getDistance(otherTranslation) < tolerance;
+        return thisTranslation.getDistance(otherTranslation) < tolerance.in(Meters);
     }
 
     /**
@@ -307,81 +385,6 @@ public abstract class SmartOpponent extends SubsystemBase
             return new Pose2d(
                     FieldMirroringUtils.flip(pose.getTranslation()),
                     FieldMirroringUtils.flip(pose.getRotation()));
-        }
-    }
-
-    protected static class ManipulatorSim extends SubsystemBase {
-        private final Map<String, org.ironmaple.simulation.IntakeSimulation> intakeSimulations;
-        private final Map<String, GamePieceProjectile> projectileSimulations;
-
-        /**
-         * Creates a new manipulator simulation.
-         */
-        public ManipulatorSim()
-        {
-            this.intakeSimulations = new HashMap<>();
-            this.projectileSimulations = new HashMap<>();
-        }
-
-        /**
-         * Adds an intake simulation to the manipulator simulation.
-         *
-         * @param name The name of the simulation.
-         * @param intakeSimulation The simulation to add.
-         * @return this, for chaining.
-         */
-        public ManipulatorSim addIntakeSimulation(String name, IntakeSimulation intakeSimulation)
-        {
-            this.intakeSimulations.put(name, intakeSimulation);
-            return this;
-        }
-
-        /**
-         * Adds a projectile simulation to the manipulator simulation.
-         *
-         * @param name The name of the simulation.
-         * @param projectileSimulation The simulation to add.
-         * @return this, for chaining.
-         */
-        public ManipulatorSim addProjectileSimulation(String name, GamePieceProjectile projectileSimulation)
-        {
-            this.projectileSimulations.put(name, projectileSimulation);
-            return this;
-        }
-
-        /**
-         * Gets an intake simulation from the manipulator simulation.
-         *
-         * @param name The name of the simulation.
-         * @return The simulation.
-         */
-        public IntakeSimulation getIntakeSimulation(String name)
-        {
-            return this.intakeSimulations.get(name);
-        }
-
-        /**
-         * Gets a projectile simulation from the manipulator simulation.
-         *
-         * @param projectileName The name of the simulation.
-         * @return The simulation.
-         */
-        public GamePieceProjectile getProjectileSimulation(String projectileName)
-        {
-            return this.projectileSimulations.get(projectileName);
-        }
-
-        /**
-         * Adds a projectile to the simulation.
-         *
-         * @param projectileName The name of the projectile simulation.
-         * @return a command to add the game piece projectile to the simulation.
-         */
-        public Command feedShot(String projectileName)
-        {
-            return Commands.runOnce(() -> {
-                SimulatedArena.getInstance().addGamePieceProjectile(getProjectileSimulation(projectileName));
-            });
         }
     }
 }

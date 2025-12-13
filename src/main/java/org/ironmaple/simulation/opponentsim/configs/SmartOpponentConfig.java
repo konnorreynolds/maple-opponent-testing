@@ -8,11 +8,9 @@ import edu.wpi.first.units.measure.*;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.Command;
-import edu.wpi.first.wpilibj2.command.button.Trigger;
 import org.ironmaple.simulation.drivesims.*;
 import org.ironmaple.simulation.drivesims.configs.DriveTrainSimulationConfig;
 import org.ironmaple.simulation.drivesims.configs.SwerveModuleSimulationConfig;
-import org.ironmaple.simulation.opponentsim.SmartOpponent;
 
 import java.util.*;
 import java.util.function.Supplier;
@@ -50,7 +48,6 @@ public class SmartOpponentConfig {
     private final Map<String, Map<String, Pose2d>> collectingMap = new HashMap<>();
 
     /// Opponent Management
-    //
     private boolean commandInProgress = false;
     // Opponents current and last states.
     public String currentState = "";
@@ -61,7 +58,6 @@ public class SmartOpponentConfig {
 
     /**
      * Default Constructor for SmartOpponentConfig.
-     *
      */
     public SmartOpponentConfig()
     {
@@ -102,10 +98,6 @@ public class SmartOpponentConfig {
                 .withStartingPose(initialPose)
                 .withChassisConfig(chassisConfig);
     }
-
-    /*
-     * Basic Option Setters
-     */
 
     /**
      * Sets the robot name.
@@ -591,14 +583,15 @@ public class SmartOpponentConfig {
      * Checks if the config is valid.
      *
      * @return true if the config is valid, false otherwise.
+     * @throws IllegalArgumentException if any config is incorrect.
      */
-    public boolean validConfig()
+    public boolean validateConfigs()
     {
         boolean validConfig = chassis.validConfig() && requiredBasicOptions.isEmpty();
         // If not set correct, report settings to update. Then throw an error.
         if (!validConfig) {
             for (BasicOptions option : requiredBasicOptions) {
-                DriverStation.reportWarning("Required Option: " + option.toString() + " not set in SmartOpponentConfig", false);
+                DriverStation.reportWarning("Required Option: " + option.toString() + " not set in SmartOpponentConfig", true);
             }
             throw new IllegalArgumentException("Invalid SmartOpponentConfig, check DriverStation Output for more info.");
         }
@@ -640,7 +633,7 @@ public class SmartOpponentConfig {
         /// Sets of required options set here.
         public Set<ChassisOptions> requiredChassisOptions;
         // Saved simulation for later use
-        public SwerveModuleSimulation moduleSim;
+        private SwerveModuleSimulationConfig moduleSimConfig;
         public RobotConfig pathplannerConfig;
 
         /**
@@ -750,26 +743,27 @@ public class SmartOpponentConfig {
          * Creates a new SwerveDriveSimulation from the current ChassisConfig.
          *
          * @param initialPose the initial pose of the robot.
-         * @return
+         * @return a new SwerveDriveSimulation from the current ChassisConfig.
          */
         public SelfControlledSwerveDriveSimulation createDriveTrainSim(Pose2d initialPose)
         {
-            // Add validation
-            if (module == null) {
-                throw new IllegalStateException("ChassisConfig.module is null! Did you forget to call .withModule()?");
+            if (!validConfig()) {
+                throw new IllegalStateException("Config is not valid! Cannot create the driveTrain simulation!");
             }
             if (module.driveMotor == null || module.steerMotor == null) {
                 throw new IllegalStateException("ModuleConfig has null motors! Drive: " + module.driveMotor + ", Steer: " + module.steerMotor);
             }
-            this.moduleSim = module.createModuleSim();
             return new SelfControlledSwerveDriveSimulation(
-                    new SwerveDriveSimulation(DriveTrainSimulationConfig.Default()
-                            .withTrackLengthTrackWidth(trackLength, trackWidth)
-                            .withRobotMass(mass)
-                            .withBumperSize(bumperLength, bumperWidth)
-                            .withSwerveModule(() -> moduleSim)
-                            .withGyro(gyroSimulation)
-                            , initialPose));
+                    new SwerveDriveSimulation(
+                            new DriveTrainSimulationConfig(
+                                    mass,
+                                    bumperLength,
+                                    bumperWidth,
+                                    trackLength,
+                                    trackWidth,
+                                    gyroSimulation,
+                                    () -> new SwerveModuleSimulation(moduleSimConfig) // Force new sims from the config.
+                            ), initialPose));
         }
 
         /**
@@ -861,17 +855,17 @@ public class SmartOpponentConfig {
          * Sets the bumper width and height to the same value.
          *
          * @param bumperLength the length of the bumpers.
-         * @param trackWidth the track width of the robot.
+         * @param trackLength the track width of the robot.
          *                   This is from one center of the wheel to the other.
          * @return this, for chaining.
          */
-        public ChassisConfig withSquareChassis(Distance bumperLength, Distance trackWidth)
+        public ChassisConfig withSquareChassis(Distance bumperLength, Distance trackLength)
         {
             return this
                     .withBumperWidth(bumperLength)
                     .withBumperHeight(bumperLength)
-                    .withTrackWidth(trackWidth)
-                    .withTrackLength(trackWidth);
+                    .withTrackWidth(trackLength)
+                    .withTrackLength(trackLength);
         }
 
         /**
@@ -935,6 +929,7 @@ public class SmartOpponentConfig {
         public ChassisConfig withModule(ModuleConfig module)
         {
             this.module = module;
+            this.moduleSimConfig = module.createModuleSimConfig();
             this.requiredChassisOptions.remove(ChassisOptions.ModuleConfig);
             return this;
         }
@@ -1110,9 +1105,9 @@ public class SmartOpponentConfig {
          *
          * @return the new {@link SwerveModuleSimulation}.
          */
-        public SwerveModuleSimulation createModuleSim()
+        public SwerveModuleSimulationConfig createModuleSimConfig()
         {
-            return new SwerveModuleSimulation(new SwerveModuleSimulationConfig(
+            return new SwerveModuleSimulationConfig(
                     driveMotor,
                     steerMotor,
                     driveGearRatio,
@@ -1121,7 +1116,7 @@ public class SmartOpponentConfig {
                     steerFrictionVoltage,
                     wheelRadius,
                     steerAngularInertia,
-                    wheelCOF));
+                    wheelCOF);
         }
 
         /**
