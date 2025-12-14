@@ -1,4 +1,4 @@
-package org.ironmaple.simulation.opponentsim.configs;
+package org.ironmaple.simulation.opponentsim;
 
 import com.pathplanner.lib.config.RobotConfig;
 import edu.wpi.first.math.Pair;
@@ -7,6 +7,7 @@ import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.units.measure.*;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import org.ironmaple.simulation.drivesims.*;
 import org.ironmaple.simulation.drivesims.configs.DriveTrainSimulationConfig;
@@ -39,7 +40,7 @@ public class SmartOpponentConfig {
 
     /// Maps using a (key, value) pair. Used to
     // Map of the robot states.
-    private final Map<String, Command> states = new HashMap<>();
+    private final Map<String, Supplier<Command>> states = new HashMap<>();
     // Map of behaviour options
     private final Map<String, Pair<Command, Boolean>> behavior = new HashMap<>();
     // Map of possible scoring poses and types. For example, Map<"Hoops", Map<"CourtLeft", Pose2d>>
@@ -54,7 +55,7 @@ public class SmartOpponentConfig {
     public String desiredState;
 
     /// Sets of required basic options
-    private Set<BasicOptions> requiredBasicOptions;
+    private final Set<BasicOptions> requiredBasicOptions;
 
     /**
      * Default Constructor for SmartOpponentConfig.
@@ -62,13 +63,13 @@ public class SmartOpponentConfig {
     public SmartOpponentConfig()
     {
         /// Sets the required basic options.
-        this.requiredBasicOptions = EnumSet.of(BasicOptions.Name, BasicOptions.Alliance, BasicOptions.InitialPose);
+        this.requiredBasicOptions = EnumSet.allOf(BasicOptions.class);
 
         /// Prepares empty config.
         this.chassis = new ChassisConfig();
 
         /// Prepares Telemetry
-        this.telemetryPath = "SmartDashboard/MapleSim/";
+        this.telemetryPath = "SmartDashboard/MapleSim/"; // Default Path
         this.smartDashboardPath = "MapleSim/";
         this.behaviorChooser = new SendableChooser<>();
     }
@@ -253,11 +254,11 @@ public class SmartOpponentConfig {
      * @param stateCommand The command to run when the state is entered.
      * @return this, for chaining.
      */
-    public SmartOpponentConfig addState(String stateName, Command stateCommand)
+    public SmartOpponentConfig addState(String stateName, Supplier<Command> stateCommand)
     {
-        states.put(stateName, stateCommand.beforeStarting(() -> {
+        states.put(stateName, () -> stateCommand.get().beforeStarting(() -> {
             setState(stateName);
-            currentState =  stateName;
+            currentState = stateName;
             commandInProgress = true;
         }).finallyDo(() -> {
             commandInProgress = false;
@@ -284,9 +285,15 @@ public class SmartOpponentConfig {
      * @param newStateCommand The new command to run when the state is entered.
      * @return this, for chaining.
      */
-    public SmartOpponentConfig replaceStateCommand(String stateName, Command newStateCommand)
+    public SmartOpponentConfig replaceStateCommand(String stateName, Supplier<Command> newStateCommand)
     {
-        states.replace(stateName, newStateCommand);
+        states.replace(stateName, () -> newStateCommand.get().beforeStarting(() -> {
+            setState(stateName);
+            currentState = stateName;
+            commandInProgress = true;
+        }).finallyDo(() -> {
+            commandInProgress = false;
+        }));
         return this;
     }
 
@@ -295,7 +302,7 @@ public class SmartOpponentConfig {
      *
      * @return the state map.
      */
-    public Map<String, Command> getStates()
+    public Map<String, Supplier<Command>> getStates()
     {
         return states;
     }
@@ -408,6 +415,18 @@ public class SmartOpponentConfig {
     }
 
     /**
+     * Adds all poses from an existing pose map.
+     *
+     * @param scoringMap the map to add.
+     * @return this, for chaining.
+     */
+    public SmartOpponentConfig addScoringMap(Map<String, Map<String, Pose2d>> scoringMap)
+    {
+        this.scoringMap.putAll(scoringMap);
+        return this;
+    }
+
+    /**
      * Adds a scoring pose to the config.
      *
      * @param poseType The type of pose to add. For example, "Hoops".
@@ -478,7 +497,10 @@ public class SmartOpponentConfig {
      */
     public Map<String, Pose2d> getScoringMap() {
         Map<String, Pose2d> scoringPoses = new HashMap<>();
-        scoringMap.forEach((poseType, poseMap) -> scoringPoses.putAll(poseMap));
+        scoringMap.forEach((poseType, poseMap) ->
+                poseMap.forEach((name, pose) -> {
+                    scoringPoses.put(poseType + name, pose);
+                }));
         return scoringPoses;
     }
 
@@ -491,6 +513,18 @@ public class SmartOpponentConfig {
         List<Pose2d> scoringPoses = new ArrayList<>();
         scoringMap.forEach((poseType, poseMap) -> poseMap.forEach((poseName, pose) -> scoringPoses.add(pose)));
         return scoringPoses;
+    }
+
+    /**
+     * Adds all poses from an existing pose map.
+     *
+     * @param collectingMap the map to add.
+     * @return this, for chaining.
+     */
+    public SmartOpponentConfig addCollectingMap(Map<String, Map<String, Pose2d>> collectingMap)
+    {
+        this.collectingMap.putAll(collectingMap);
+        return this;
     }
 
     /**
@@ -564,7 +598,10 @@ public class SmartOpponentConfig {
      */
     public Map<String, Pose2d> getCollectingMap() {
         Map<String, Pose2d> collectingPoses = new HashMap<>();
-        collectingMap.forEach((poseType, poseMap) -> collectingPoses.putAll(poseMap));
+        collectingMap.forEach((poseType, poseMap) ->
+                poseMap.forEach((name, pose) ->
+                        collectingPoses.put(poseType + name, pose)));
+        DriverStation.reportWarning("Collecting Map: " + collectingPoses, false);
         return collectingPoses;
     }
 
@@ -629,6 +666,7 @@ public class SmartOpponentConfig {
         public ModuleConfig module;
         /// Optional chassis options
         public Distance driveToPoseTolerance;
+        public Angle driveToPoseAngleTolerance;
         public Supplier<GyroSimulation> gyroSimulation;
         /// Sets of required options set here.
         public Set<ChassisOptions> requiredChassisOptions;
@@ -642,10 +680,11 @@ public class SmartOpponentConfig {
          */
         ChassisConfig() {
             /// Adds the required options to the checklist.
-            requiredChassisOptions = EnumSet.allOf(ChassisOptions.class);
+            this.requiredChassisOptions = EnumSet.allOf(ChassisOptions.class);
             /// Optional chassis options
-            driveToPoseTolerance = Inches.of(4);
-            gyroSimulation = COTS.ofGenericGyro();
+            this.driveToPoseTolerance = Inches.of(4);
+            this.driveToPoseAngleTolerance = Degrees.of(5);
+            this.gyroSimulation = COTS.ofGenericGyro();
         }
 
         /**
@@ -943,6 +982,12 @@ public class SmartOpponentConfig {
         public ChassisConfig withDriveToPoseTolerance(Distance tolerance)
         {
             this.driveToPoseTolerance = tolerance;
+            return this;
+        }
+
+        public ChassisConfig withDriveToPoseAngleTolerance(Angle tolerance)
+        {
+            this.driveToPoseAngleTolerance = tolerance;
             return this;
         }
 

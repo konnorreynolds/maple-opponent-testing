@@ -8,6 +8,7 @@ import edu.wpi.first.wpilibj.DriverStation;
 import java.util.Arrays;
 import java.util.List;
 import org.ironmaple.simulation.SimulatedArena;
+import org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim.ReefscapeOpponentPoses;
 import org.ironmaple.utils.FieldMirroringUtils;
 
 /**
@@ -23,7 +24,6 @@ public class Arena2025Reefscape extends SimulatedArena {
     public static final class ReefscapeFieldObstacleMap extends FieldMap {
         public ReefscapeFieldObstacleMap() {
             super();
-
             // blue wall
             super.addBorderLine(new Translation2d(0, 1.270), new Translation2d(0, 6.782));
 

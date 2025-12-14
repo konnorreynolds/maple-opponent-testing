@@ -5,14 +5,15 @@ import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import com.pathplanner.lib.path.Waypoint;
 import com.pathplanner.lib.trajectory.PathPlannerTrajectoryState;
-import edu.wpi.first.math.filter.Debouncer;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.networktables.*;
+import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.Distance;
+import edu.wpi.first.units.measure.LinearVelocity;
 import edu.wpi.first.units.measure.Time;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -22,7 +23,6 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import org.ironmaple.simulation.SimulatedArena;
 import org.ironmaple.simulation.drivesims.SelfControlledSwerveDriveSimulation;
-import org.ironmaple.simulation.opponentsim.configs.SmartOpponentConfig;
 import org.ironmaple.simulation.opponentsim.pathfinding.MapleADStar;
 import org.ironmaple.utils.FieldMirroringUtils;
 
@@ -49,9 +49,11 @@ public abstract class SmartOpponent extends SubsystemBase
     /// Pathplanner HolonomicDriveController
     protected PPHolonomicDriveController driveController;
     // Pathfinding class cloned for modification.
-    private final MapleADStar mapleADStar;
+    protected final MapleADStar mapleADStar;
     // Behavior Chooser Publisher
-    private StringPublisher selectedBehaviorPublisher;
+    protected StringPublisher selectedBehaviorPublisher;
+    // Target Pose
+    protected Pose2d targetPose;
 
     public SmartOpponent(SmartOpponentConfig config)
     {
@@ -82,10 +84,10 @@ public abstract class SmartOpponent extends SubsystemBase
                 .getStringTopic("selected")
                 .publish();
         /// Adds the required states to run the {@link org.ironmaple.simulation.opponentsim.SmartOpponent}.
-        config.addState("Standby", standbyState());
-        config.addState("Starting", startingState("Collect"));
-        config.addState("Collect", collectState());
-        config.addState("Score", scoreState());
+        config.addState("Standby", this::standbyState);
+        config.addState("Starting", () -> startingState("Collect"));
+        config.addState("Collect", this::collectState);
+        config.addState("Score", this::scoreState);
         setState("Standby");
         /// Adds options to the behavior sendable chooser.
         config.addBehavior("Disabled", runState("Standby", true), true);
@@ -207,14 +209,8 @@ public abstract class SmartOpponent extends SubsystemBase
         if (!commandInProgress && !Objects.equals("Standby", config.desiredState)) {
             runState(config.desiredState, false).schedule();
         }
-        drivetrainSim.periodic();
         statePublisher.set(config.currentState);
         posePublisher.set(drivetrainSim.getActualPoseInSimulationWorld());
-        StringBuilder moduleStates = new StringBuilder("Module States:");
-        for (SwerveModulePosition pose : drivetrainSim.getLatestModulePositions()) {
-            moduleStates.append(pose.toString());
-            moduleStates.append(", ");
-        }
     }
 
     /**
@@ -254,7 +250,17 @@ public abstract class SmartOpponent extends SubsystemBase
             }
         }
         /// If nothing is in the way, get our state.
-        return config.getStates().get(state);
+        return config.getStates().get(state).get();
+    }
+
+    /**
+     * Gets the opponent's current active target pose.
+     *
+     * @return either the opponent target pose or null if there is no active target.
+     */
+    public Pose2d getTargetPose()
+    {
+        return targetPose;
     }
 
     /**
@@ -264,39 +270,36 @@ public abstract class SmartOpponent extends SubsystemBase
      * @return A command to pathfind to the target pose.
      */
     protected Command pathfind(Pose2d targetPose, Time timeout) {
-        // Store initial waypoint count for rotation interpolation. As an array so it can be accessed atomically.
-        final int[] initialWaypointCount = {0};
+        int[] initialSize = {0};
+        Pose2d finalPose = ifShouldFlip(targetPose);
+        // Store targetPose as a global var
+        this.targetPose = finalPose;
         /// Set up the pathfinder
         mapleADStar.setStartPosition(drivetrainSim.getActualPoseInSimulationWorld().getTranslation());
-        mapleADStar.setGoalPosition(targetPose.getTranslation());
+        mapleADStar.setGoalPosition(finalPose.getTranslation());
         mapleADStar.runThread();
         return Commands.defer(() ->
                         Commands.run(() -> {
             Pose2d currentPose = drivetrainSim.getActualPoseInSimulationWorld();
-            List<Waypoint> waypoints = mapleADStar.currentWaypoints;
-            Translation2d targetTranslation;
-            Rotation2d targetRotation;
+            List<Pose2d> pathPoses = mapleADStar.currentPathPoses;
+            Pose2d currentTarget;
             /// If waypoints exist, make the next one our target.
-            if (!waypoints.isEmpty()) {
-                targetTranslation = waypoints.get(0).anchor();
-                // Interpolate rotation based on progress (0.0 to 1.0)
-                targetRotation = currentPose.getRotation().interpolate(
-                        targetPose.getRotation(),
-                        (double) initialWaypointCount[0] / waypoints.size());
+            if (!pathPoses.isEmpty()) {
+                currentTarget = new Pose2d(pathPoses.get(0).getTranslation(),
+                        // Interpolate our rotation goal for smooth rotation. Rotation is 0 on these obtained goals.
+                        currentPose.getRotation().interpolate(finalPose.getRotation(),
+                                (double) (initialSize[0] - pathPoses.size()) / initialSize[0]));
                 /// If we are close enough, remove it and move to the next waypoint.
-                if (currentPose.getTranslation().getDistance(targetTranslation) < config.chassis.driveToPoseTolerance.in(Meters)) {
-                    waypoints.remove(0);
+                if (nearPose(currentTarget, config.chassis.driveToPoseTolerance.times(3), config.chassis.driveToPoseAngleTolerance.times(3))) {
+                    pathPoses.remove(0);
                 }
                 /// Else, we set our target to our desired final pose.
             } else {
-                targetTranslation = targetPose.getTranslation();
-                targetRotation = targetPose.getRotation();
+                currentTarget = finalPose;
             }
-            /// Create a {@link Pose2d} from our waypoint targets.
-            Pose2d waypointTarget = new Pose2d(targetTranslation, targetRotation);
             /// Create a desired state
             PathPlannerTrajectoryState state = new PathPlannerTrajectoryState();
-            state.pose = waypointTarget;
+            state.pose = currentTarget;
             /// Calculate our chassis speeds.
             ChassisSpeeds speeds = driveController.calculateRobotRelativeSpeeds(
                     currentPose,
@@ -305,11 +308,14 @@ public abstract class SmartOpponent extends SubsystemBase
         })
                 /// Once we have no more targets, finish the command.
                 .until(() -> {
-                    List<Waypoint> waypoints = mapleADStar.currentWaypoints;
-                    return waypoints.isEmpty() && nearPose(targetPose, config.chassis.driveToPoseTolerance);
+                    List<Pose2d> waypoints = mapleADStar.currentPathPoses;
+                    return waypoints.isEmpty() && nearPose(finalPose, config.chassis.driveToPoseTolerance, config.chassis.driveToPoseAngleTolerance);
                 })
-                .finallyDo(() -> drivetrainSim.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false)), Set.of(this)) /// Stop moving when done.
-                .beforeStarting(() -> initialWaypointCount[0] = mapleADStar.currentWaypoints.size()) /// Set the waypoint count when starting.
+                .finallyDo(() -> {
+                    drivetrainSim.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false);
+                    this.targetPose = null;
+                }), Set.of(this)) /// Stop moving when done.
+                .beforeStarting(() -> initialSize[0] = mapleADStar.currentPathPoses.size())
                 .withTimeout(timeout); /// Set a timeout, usually 7sec is good.
     }
 
@@ -339,20 +345,29 @@ public abstract class SmartOpponent extends SubsystemBase
 
     /**
      * Gets a random pose from a map.
+     * If the map is empty reports an error and returns null.
      *
      * @param poseMap The map to get a pose from.
      * @return A random pose from the map.
      */
     protected Pose2d getRandomFromMap(Map<String, Pose2d> poseMap) {
-        var value = poseMap.values().toArray(new Pose2d[0])[new Random().nextInt(poseMap.size())];
-        SmartDashboard.putString("Random From Map", value.toString());
-        return value;
+        if (poseMap.isEmpty()) {
+            DriverStation.reportError("Pose map is empty!!!", true);
+            return null;
+        }
+        return poseMap.values().toArray(new Pose2d[0])[new Random().nextInt(poseMap.size())];
     }
 
-    public boolean nearPose(Pose2d pose, Distance tolerance) {
-        Translation2d thisTranslation = drivetrainSim.getActualPoseInSimulationWorld().getTranslation();
-        Translation2d otherTranslation = pose.getTranslation();
-        return thisTranslation.getDistance(otherTranslation) < tolerance.in(Meters);
+    public boolean nearPose(Pose2d pose, Distance tolerance, Angle toleranceAngle) {
+        Pose2d robotPose = drivetrainSim.getActualPoseInSimulationWorld();
+        return robotPose.getTranslation().getDistance(pose.getTranslation()) < tolerance.in(Meters)
+                && Math.abs(robotPose.getRotation().minus(pose.getRotation()).getDegrees()) < toleranceAngle.in(Degrees);
+    }
+
+    public boolean isMoving(LinearVelocity tolerance)
+    {
+        return drivetrainSim.getActualSpeedsRobotRelative().vxMetersPerSecond > tolerance.in(MetersPerSecond)
+                || drivetrainSim.getActualSpeedsRobotRelative().vyMetersPerSecond > tolerance.in(MetersPerSecond);
     }
 
     /**

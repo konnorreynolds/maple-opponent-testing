@@ -21,13 +21,17 @@ public class RobotContainer {
     // The robot's subsystems and commands are defined here...'
     private final CommandXboxController xboxController = new CommandXboxController(0);
     private final SwerveSubsystem drive = new SwerveSubsystem();
-    private final KitBot opponent;
 
   public RobotContainer()
   {
       PathfindingCommand.warmupCommand().schedule();
-      opponent = new KitBot("Kitbot", DriverStation.Alliance.Blue)
+      new KitBot("Kitbot 1", DriverStation.Alliance.Blue)
               .withXboxController(new CommandXboxController(1));
+      new KitBot("Kitbot 2", DriverStation.Alliance.Red);
+      new KitBot("Kitbot 3", DriverStation.Alliance.Blue);
+      new KitBot("Kitbot 4", DriverStation.Alliance.Red);
+      new KitBot("Kitbot 5", DriverStation.Alliance.Blue);
+      new KitBot("Kitbot 6", DriverStation.Alliance.Red);
       configureBindings();
   }
 

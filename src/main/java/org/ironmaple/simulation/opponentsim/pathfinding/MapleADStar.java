@@ -44,6 +44,7 @@ public class MapleADStar implements Pathfinder {
     private final ReadWriteLock pathLock = new ReentrantReadWriteLock();
     private final ReadWriteLock requestLock = new ReentrantReadWriteLock();
     public List<Waypoint> currentWaypoints = new ArrayList<>();
+    public List<Pose2d> currentPathPoses =  new ArrayList<>();
     public List<GridPosition> currentPathFull = new ArrayList<>();
     private double fieldLength = 16.54;
     private double fieldWidth = 8.02;
@@ -383,7 +384,7 @@ public class MapleADStar implements Pathfinder {
         return path;
     }
 
-    private List<Waypoint> createWaypoints(
+    private List<Pose2d> createPathPoses(
             List<GridPosition> path,
             Translation2d realStartPos,
             Translation2d realGoalPos,
@@ -438,6 +439,64 @@ public class MapleADStar implements Pathfinder {
                                 .minus(fieldPosPath.get(fieldPosPath.size() - 2))
                                 .getAngle()));
 
+        return pathPoses;
+    }
+
+    private List<Waypoint> createWaypoints(
+            List<GridPosition> path,
+            Translation2d realStartPos,
+            Translation2d realGoalPos,
+            Set<GridPosition> obstacles) {
+        if (path.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<GridPosition> simplifiedPath = new ArrayList<>();
+        simplifiedPath.add(path.get(0));
+        for (int i = 1; i < path.size() - 1; i++) {
+            if (!walkable(simplifiedPath.get(simplifiedPath.size() - 1), path.get(i + 1), obstacles)) {
+                simplifiedPath.add(path.get(i));
+            }
+        }
+        simplifiedPath.add(path.get(path.size() - 1));
+
+        List<Translation2d> fieldPosPath = new ArrayList<>();
+        for (GridPosition pos : simplifiedPath) {
+            fieldPosPath.add(gridPosToTranslation2d(pos));
+        }
+
+        if (fieldPosPath.size() < 2) {
+            return new ArrayList<>();
+        }
+
+        // Replace start and end positions with their real positions
+        fieldPosPath.set(0, realStartPos);
+        fieldPosPath.set(fieldPosPath.size() - 1, realGoalPos);
+
+        List<Pose2d> pathPoses = new ArrayList<>();
+        pathPoses.add(
+                new Pose2d(fieldPosPath.get(0), fieldPosPath.get(1).minus(fieldPosPath.get(0)).getAngle()));
+        for (int i = 1; i < fieldPosPath.size() - 1; i++) {
+            Translation2d last = fieldPosPath.get(i - 1);
+            Translation2d current = fieldPosPath.get(i);
+            Translation2d next = fieldPosPath.get(i + 1);
+
+            Translation2d anchor1 = current.minus(last).times(SMOOTHING_ANCHOR_PCT).plus(last);
+            Rotation2d heading1 = current.minus(last).getAngle();
+            Translation2d anchor2 = current.minus(next).times(SMOOTHING_ANCHOR_PCT).plus(next);
+            Rotation2d heading2 = next.minus(anchor2).getAngle();
+
+            pathPoses.add(new Pose2d(anchor1, heading1));
+            pathPoses.add(new Pose2d(anchor2, heading2));
+        }
+        pathPoses.add(
+                new Pose2d(
+                        fieldPosPath.get(fieldPosPath.size() - 1),
+                        fieldPosPath
+                                .get(fieldPosPath.size() - 1)
+                                .minus(fieldPosPath.get(fieldPosPath.size() - 2))
+                                .getAngle()));
+        this.currentPathPoses = pathPoses;
         return PathPlannerPath.waypointsFromPoses(pathPoses);
     }
 
