@@ -3,13 +3,11 @@ package org.ironmaple.simulation.opponentsim;
 import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
-import com.pathplanner.lib.path.Waypoint;
 import com.pathplanner.lib.trajectory.PathPlannerTrajectoryState;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
-import edu.wpi.first.math.kinematics.SwerveModulePosition;
 import edu.wpi.first.networktables.*;
 import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.Distance;
@@ -55,6 +53,11 @@ public abstract class SmartOpponent extends SubsystemBase
     // Target Pose
     protected Pose2d targetPose;
 
+    /**
+     * The SmartOpponent base abstracted class.
+     *
+     * @param config the {@link SmartOpponentConfig} to base the opponent off of.
+     */
     public SmartOpponent(SmartOpponentConfig config)
     {
         /// Create and verify config.
@@ -84,14 +87,14 @@ public abstract class SmartOpponent extends SubsystemBase
                 .getStringTopic("selected")
                 .publish();
         /// Adds the required states to run the {@link org.ironmaple.simulation.opponentsim.SmartOpponent}.
-        config.addState("Standby", this::standbyState);
-        config.addState("Starting", () -> startingState("Collect"));
-        config.addState("Collect", this::collectState);
-        config.addState("Score", this::scoreState);
+        config.withState("Standby", this::standbyState);
+        config.withState("Starting", () -> startingState("Collect"));
+        config.withState("Collect", this::collectState);
+        config.withState("Score", this::scoreState);
         setState("Standby");
         /// Adds options to the behavior sendable chooser.
-        config.addBehavior("Disabled", runState("Standby", true), true);
-        config.addBehavior("Enabled", runState("Starting", true));
+        config.withBehavior("Disabled", runState("Standby", true), true);
+        config.withBehavior("Enabled", runState("Starting", true));
         // Update the chooser and then publish it.
         SmartDashboard.putData(config.smartDashboardPath + "SimulatedOpponents/Behaviors/" + allianceString
                 + config.name + "'s Behaviors", config.updateBehaviorChooser());
@@ -102,6 +105,10 @@ public abstract class SmartOpponent extends SubsystemBase
         if (config.isAutoEnable) {
             RobotModeTriggers.teleop().onTrue(Commands.runOnce(() -> config.getBehaviorChooser().getSelected().schedule()));
             RobotModeTriggers.disabled().onTrue(standbyState());
+        }
+        /// If a manager is set register with it
+        if (config.manager != null) {
+            config.manager.registerOpponent(this);
         }
     }
 
@@ -254,6 +261,16 @@ public abstract class SmartOpponent extends SubsystemBase
     }
 
     /**
+     * Gets the current actual opponent pose.
+     *
+     * @return the opponent {@link Pose2d}.
+     */
+    public Pose2d getOpponentPose()
+    {
+        return drivetrainSim.getActualPoseInSimulationWorld();
+    }
+
+    /**
      * Gets the opponent's current active target pose.
      *
      * @return either the opponent target pose or null if there is no active target.
@@ -271,52 +288,66 @@ public abstract class SmartOpponent extends SubsystemBase
      */
     protected Command pathfind(Pose2d targetPose, Time timeout) {
         int[] initialSize = {0};
-        Pose2d finalPose = ifShouldFlip(targetPose);
+        /// Determine pose data
+        Pose2d flippedPose = ifShouldFlip(targetPose);
         // Store targetPose as a global var
-        this.targetPose = finalPose;
+        this.targetPose = flippedPose;
+        // Add offset after setting flipped generic target.
+        Pose2d finalPose = flippedPose.plus(config.pathfindOffset);
         /// Set up the pathfinder
         mapleADStar.setStartPosition(drivetrainSim.getActualPoseInSimulationWorld().getTranslation());
         mapleADStar.setGoalPosition(finalPose.getTranslation());
         mapleADStar.runThread();
+        /// Defer the command to runtime, this updates our values when the command is called upon.
+        /// This makes sure all of our data is fresh as can be.
         return Commands.defer(() ->
                         Commands.run(() -> {
-            Pose2d currentPose = drivetrainSim.getActualPoseInSimulationWorld();
-            List<Pose2d> pathPoses = mapleADStar.currentPathPoses;
-            Pose2d currentTarget;
-            /// If waypoints exist, make the next one our target.
-            if (!pathPoses.isEmpty()) {
-                currentTarget = new Pose2d(pathPoses.get(0).getTranslation(),
-                        // Interpolate our rotation goal for smooth rotation. Rotation is 0 on these obtained goals.
-                        currentPose.getRotation().interpolate(finalPose.getRotation(),
-                                (double) (initialSize[0] - pathPoses.size()) / initialSize[0]));
-                /// If we are close enough, remove it and move to the next waypoint.
-                if (nearPose(currentTarget, config.chassis.driveToPoseTolerance.times(3), config.chassis.driveToPoseAngleTolerance.times(3))) {
-                    pathPoses.remove(0);
-                }
-                /// Else, we set our target to our desired final pose.
-            } else {
-                currentTarget = finalPose;
-            }
-            /// Create a desired state
-            PathPlannerTrajectoryState state = new PathPlannerTrajectoryState();
-            state.pose = currentTarget;
-            /// Calculate our chassis speeds.
-            ChassisSpeeds speeds = driveController.calculateRobotRelativeSpeeds(
-                    currentPose,
-                    state);
-            drivetrainSim.runChassisSpeeds(speeds, new Translation2d(), false, false);
-        })
-                /// Once we have no more targets, finish the command.
-                .until(() -> {
-                    List<Pose2d> waypoints = mapleADStar.currentPathPoses;
-                    return waypoints.isEmpty() && nearPose(finalPose, config.chassis.driveToPoseTolerance, config.chassis.driveToPoseAngleTolerance);
-                })
-                .finallyDo(() -> {
-                    drivetrainSim.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false);
-                    this.targetPose = null;
-                }), Set.of(this)) /// Stop moving when done.
-                .beforeStarting(() -> initialSize[0] = mapleADStar.currentPathPoses.size())
-                .withTimeout(timeout); /// Set a timeout, usually 7sec is good.
+                            /// If we are close to another opponent registered by our manager, update obstacles and recalculate our path.
+                            config.manager.ifNearAddObstacles(mapleADStar, this,
+                                    (count) -> {initialSize[0] = count;}, Meters.of(2));
+                            Pose2d currentPose = drivetrainSim.getActualPoseInSimulationWorld();
+                            List<Pose2d> pathPoses = mapleADStar.currentPathPoses;
+                            Pose2d currentTarget;
+                            /// If waypoints exist, make the next one our target.
+                            if (!pathPoses.isEmpty())
+                            {
+                                currentTarget = new Pose2d(pathPoses.get(0).getTranslation(),
+                                        // Interpolate our rotation goal for smooth rotation. Rotation is 0 on these obtained goals.
+                                        currentPose.getRotation().interpolate(finalPose.getRotation(),
+                                                (double) (initialSize[0] - pathPoses.size()) / initialSize[0]));
+                                /// If we are close enough, remove it and move to the next waypoint.
+                                if (nearPose(currentTarget,
+                                        config.chassis.driveToPoseTolerance.times(3),
+                                        config.chassis.driveToPoseAngleTolerance.times(3)))
+                                {
+                                    pathPoses.remove(0);
+                                }
+                            } /// Else, we set our target to our desired final pose.
+                            else {
+                                currentTarget = finalPose;
+                            }
+                            /// Create a desired state
+                            PathPlannerTrajectoryState state = new PathPlannerTrajectoryState();
+                            state.pose = currentTarget;
+                            /// Calculate our chassis speeds.
+                            ChassisSpeeds speeds = driveController.calculateRobotRelativeSpeeds(
+                                    currentPose,
+                                    state);
+                            drivetrainSim.runChassisSpeeds(speeds, new Translation2d(), false, false);
+                        }) /// Once we have no more targets, finish the command.
+                                .until(() -> {
+                                    List<Pose2d> waypoints = mapleADStar.currentPathPoses;
+                                    return waypoints.isEmpty() && nearPose(finalPose, config.chassis.driveToPoseTolerance, config.chassis.driveToPoseAngleTolerance);
+                            }) /// Finally, stop the chassis and clear our target.
+                                .finallyDo(() -> {
+                                    drivetrainSim.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false);
+                                    this.targetPose = Pose2d.kZero;
+                                }) /// Before we start, update our waypoint count.
+                                .beforeStarting(() -> initialSize[0] = mapleADStar.currentPathPoses.size())
+                                /// Set a timeout, usually 7 sec is good.,
+                                .withTimeout(timeout),
+                /// A set of this subsystem for the deferred command requirements.
+                Set.of(this));
     }
 
     /**
@@ -358,10 +389,10 @@ public abstract class SmartOpponent extends SubsystemBase
         return poseMap.values().toArray(new Pose2d[0])[new Random().nextInt(poseMap.size())];
     }
 
-    public boolean nearPose(Pose2d pose, Distance tolerance, Angle toleranceAngle) {
+    public boolean nearPose(Pose2d pose, Distance tolerance, Angle angleTolerance) {
         Pose2d robotPose = drivetrainSim.getActualPoseInSimulationWorld();
         return robotPose.getTranslation().getDistance(pose.getTranslation()) < tolerance.in(Meters)
-                && Math.abs(robotPose.getRotation().minus(pose.getRotation()).getDegrees()) < toleranceAngle.in(Degrees);
+                && Math.abs(robotPose.getRotation().minus(pose.getRotation()).getDegrees()) < angleTolerance.in(Degrees);
     }
 
     public boolean isMoving(LinearVelocity tolerance)
@@ -377,7 +408,7 @@ public abstract class SmartOpponent extends SubsystemBase
      * @return The flipped pose.
      */
     protected Pose2d ifShouldFlip(Pose2d pose) {
-        if (config.alliance == DriverStation.Alliance.Red) {
+        if (config.alliance == DriverStation.Alliance.Blue) {
             return pose;
         } else {
             return new Pose2d(

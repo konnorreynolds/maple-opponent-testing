@@ -115,18 +115,18 @@ public class SwerveSubsystem extends SubsystemBase
         .withIdleMode(SmartMotorControllerConfig.MotorMode.BRAKE)
         .withGearing(driveGearing)
         .withStatorCurrentLimit(Amps.of(40))
-        .withTelemetry("driveMotor", SmartMotorControllerConfig.TelemetryVerbosity.HIGH);
+        .withTelemetry("driveMotor", SmartMotorControllerConfig.TelemetryVerbosity.LOW);
     SmartMotorControllerConfig azimuthCfg = new SmartMotorControllerConfig(this)
         .withClosedLoopController(50, 0, 4)
         .withContinuousWrapping(Radians.of(-Math.PI), Radians.of(Math.PI))
         .withGearing(azimuthGearing)
         .withStatorCurrentLimit(Amps.of(20))
-        .withTelemetry("angleMotor", SmartMotorControllerConfig.TelemetryVerbosity.HIGH);
+        .withTelemetry("angleMotor", SmartMotorControllerConfig.TelemetryVerbosity.LOW);
     SmartMotorController driveSMC   = new SparkWrapper(drive, DCMotor.getNEO(1), driveCfg);
     SmartMotorController azimuthSMC = new SparkWrapper(azimuth, DCMotor.getNEO(1), azimuthCfg);
     SwerveModuleConfig moduleConfig = new SwerveModuleConfig(driveSMC, azimuthSMC)
         .withAbsoluteEncoder(absoluteEncoder.getAbsolutePosition().asSupplier())
-        .withTelemetry(moduleName, SmartMotorControllerConfig.TelemetryVerbosity.HIGH)
+        .withTelemetry(moduleName, SmartMotorControllerConfig.TelemetryVerbosity.LOW)
         .withLocation(location)
         .withOptimization(true);
     return new SwerveModule(moduleConfig);

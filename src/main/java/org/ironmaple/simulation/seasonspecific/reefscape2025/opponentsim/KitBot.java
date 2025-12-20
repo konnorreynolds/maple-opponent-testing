@@ -1,9 +1,7 @@
 package org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim;
 
 import edu.wpi.first.math.MathUtil;
-import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
-import edu.wpi.first.math.geometry.Transform2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -13,31 +11,29 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import org.ironmaple.simulation.IntakeSimulation;
 import org.ironmaple.simulation.opponentsim.SmartOpponent;
 import org.ironmaple.simulation.opponentsim.SmartOpponentConfig;
+import org.ironmaple.simulation.seasonspecific.reefscape2025.Arena2025Reefscape;
 import org.ironmaple.simulation.seasonspecific.reefscape2025.ReefscapeCoralOnFly;
 
 import static edu.wpi.first.units.Units.*;
 
 public class KitBot extends SmartOpponent {
-    private final Transform2d poseOffset = new Transform2d(new Translation2d(Inches.of(-12), Inches.of(0)), Rotation2d.kZero);
     public KitBot(String name, DriverStation.Alliance alliance) {
         /// All Options should be set in the constructor.
         super(new SmartOpponentConfig()
                 .withName(name)
                 .withAlliance(alliance)
-                .withStartingPose(ReefscapeOpponentPoses.getInitialPose(alliance))
-                .withQueeningPose(ReefscapeOpponentPoses.getQueeningPose())
+                .withManager(Arena2025Reefscape.getInstance().getOpponentManager())
                 .withChassisConfig(SmartOpponentConfig.ChassisConfig.Presets.SimpleSquareChassis.getConfig())
-                .addScoringMap(ReefscapeOpponentPoses.getRawScoringMap())
                 .removeScoringPoseType("Barge")
-                .addCollectingMap(ReefscapeOpponentPoses.getRawCollectingMap())
                 .withAutoEnable());
+        /// Adds a separate subsystem thread for the manipulator, this allows better manual control support.
         this.manipulatorSim
                 .addIntakeSimulation("Intake",
                         IntakeSimulation.InTheFrameIntake(
                                 "Coral",
                                 drivetrainSim.getDriveTrainSimulation(),
                                 Inches.of(20),
-                                IntakeSimulation.IntakeSide.BACK,
+                                IntakeSimulation.IntakeSide.FRONT,
                                 1))
                 .addProjectileSimulation("Coral",
                         () -> new ReefscapeCoralOnFly(
@@ -61,9 +57,8 @@ public class KitBot extends SmartOpponent {
      */
     @Override
     protected Command collectState() {
-        return pathfind(getRandomFromMap(config.getCollectingMap()), Seconds.of(4))
-                .andThen(manipulatorSim.intake("Intake")
-                        .withDeadline(Commands.waitSeconds(1)))
+        return pathfind(getRandomFromMap(config.getCollectingMap()), Seconds.of(6))
+                .andThen(manipulatorSim.intake("Intake").withTimeout(0.5))
                 .finallyDo(() -> setState("Score"))
                 .withTimeout(10);
     }
@@ -75,19 +70,22 @@ public class KitBot extends SmartOpponent {
      */
     @Override
     protected Command scoreState() {
-        return pathfind(getRandomFromMap(config.getScoringMap()), Seconds.of(6))
+        return pathfind(getRandomFromMap(config.getScoringMap()), Seconds.of(10))
                 .andThen(Commands.waitSeconds(0.2))
                 .andThen(manipulatorSim.score("Coral"))
                 .andThen(Commands.waitSeconds(0.5))
                 .finallyDo(() -> setState("Collect"))
-                .withTimeout(10);
+                .withTimeout(13);
     }
 
     public KitBot withXboxController(CommandXboxController xboxController) {
         config.withJoystick(xboxController);
-        config.addState("Joystick", this::joystickState);
-        config.addBehavior("Player", startingState("Joystick").andThen(startingState("Joystick").ignoringDisable(true)));
+        config.withState("Joystick", this::joystickState);
+        config.withBehavior("Player", startingState("Joystick").andThen(startingState("Joystick").ignoringDisable(true)));
         config.updateBehaviorChooser();
+        /// Enable Manipulator control
+        xboxController.leftBumper().and(config.isStateTrigger("Joystick")).whileTrue(manipulatorSim.intake("Intake"));
+        xboxController.rightBumper().and(config.isStateTrigger("Joystick")).whileTrue(manipulatorSim.score("Coral"));
         return this;
     }
 

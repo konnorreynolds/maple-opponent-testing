@@ -3,12 +3,13 @@ package org.ironmaple.simulation.opponentsim;
 import com.pathplanner.lib.config.RobotConfig;
 import edu.wpi.first.math.Pair;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Transform2d;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.units.measure.*;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.button.Trigger;
 import org.ironmaple.simulation.drivesims.*;
 import org.ironmaple.simulation.drivesims.configs.DriveTrainSimulationConfig;
 import org.ironmaple.simulation.drivesims.configs.SwerveModuleSimulationConfig;
@@ -32,6 +33,8 @@ public class SmartOpponentConfig {
     // Joystick Options
     protected Optional<Object> joystick = Optional.empty();
     public double joystickdeadband = 0.1;
+    // Pathfind pose offset translation to compensate for different chassis'
+    public Transform2d pathfindOffset;
     // Auto Enable and Disable Opponent Support
     public boolean isAutoEnable;
 
@@ -49,6 +52,7 @@ public class SmartOpponentConfig {
     private final Map<String, Map<String, Pose2d>> collectingMap = new HashMap<>();
 
     /// Opponent Management
+    protected OpponentManager manager;
     private boolean commandInProgress = false;
     // Opponents current and last states.
     public String currentState = "";
@@ -64,6 +68,7 @@ public class SmartOpponentConfig {
     {
         /// Sets the required basic options.
         this.requiredBasicOptions = EnumSet.allOf(BasicOptions.class);
+        withPathfindOffset(Transform2d.kZero); // Sets a zero offset for default use.
 
         /// Prepares empty config.
         this.chassis = new ChassisConfig();
@@ -124,6 +129,46 @@ public class SmartOpponentConfig {
         this.alliance = alliance;
         this.requiredBasicOptions.remove(BasicOptions.Alliance);
         return this;
+    }
+
+    /**
+     * Adds a {@link  OpponentManager} to register with. </p>
+     * Set alliance and name beforehand. </p>
+     * Sets these values as well </p>
+     * withStartingPose() </p>
+     * withQueeningPose() </p>
+     * withCollectingMap() </p>
+     * withScoringMap() </p>
+     *
+     * @param manager the {@link OpponentManager} to use.
+     * @return this, for chaining.
+     * @return this, for chaining.
+     */
+    public SmartOpponentConfig withManager(OpponentManager manager)
+    {
+        if (alliance == null) {
+            DriverStation.reportError("Alliance is null", true);
+        }
+        this.manager = manager;
+        withStartingPose(this.manager.getInitialPose(alliance))
+                .withQueeningPose(this.manager.getQueeningPose())
+                .withCollectingMap(this.manager.getRawCollectingMap())
+                .withScoringMap(this.manager.getRawScoringMap());
+        return this;
+    }
+
+    /**
+     * Gets this opponent's manager if registered.
+     *
+     * @return the {@link OpponentManager} being used.
+     */
+    public OpponentManager getManager()
+    {
+        if(manager == null) {
+            DriverStation.reportWarning("MapleSim getManager() returned null, no manager was found.", false);
+            return null;
+        }
+        return manager;
     }
 
     /**
@@ -202,6 +247,12 @@ public class SmartOpponentConfig {
         return this;
     }
 
+    public SmartOpponentConfig withPathfindOffset(Transform2d pathfindOffset)
+    {
+        this.pathfindOffset = pathfindOffset;
+        return this;
+    }
+
     /**
      * Sets the chassis config.
      * This is the only input to encourage full configuration of the robot.
@@ -254,7 +305,7 @@ public class SmartOpponentConfig {
      * @param stateCommand The command to run when the state is entered.
      * @return this, for chaining.
      */
-    public SmartOpponentConfig addState(String stateName, Supplier<Command> stateCommand)
+    public SmartOpponentConfig withState(String stateName, Supplier<Command> stateCommand)
     {
         states.put(stateName, () -> stateCommand.get().beforeStarting(() -> {
             setState(stateName);
@@ -308,6 +359,26 @@ public class SmartOpponentConfig {
     }
 
     /**
+     * Checks if the current state is equal to the given state.
+     *
+     * @param state the state to check.
+     * @return return true if states are the same.
+     */
+    public boolean isState(String state) {
+        return currentState.equals(state);
+    }
+
+    /**
+     * Checks if the current state is equal to the given state.
+     *
+     * @param state the state to check.
+     * @return return true if states are the same.
+     */
+    public Trigger isStateTrigger(String state) {
+        return new Trigger(() -> currentState.equals(state));
+    }
+
+    /**
      * Adds a behavior to the config.
      *
      * @param behaviorName The name of the behavior.
@@ -315,7 +386,7 @@ public class SmartOpponentConfig {
      * @param isDefault whether this option should be the default. There can only be one.
      * @return this, for chaining.
      */
-    public SmartOpponentConfig addBehavior(String behaviorName, Command behaviorCommand, boolean isDefault)
+    public SmartOpponentConfig withBehavior(String behaviorName, Command behaviorCommand, boolean isDefault)
     {
         behavior.put(behaviorName, Pair.of(behaviorCommand, isDefault));
         return this;
@@ -328,9 +399,9 @@ public class SmartOpponentConfig {
      * @param behaviorCommand The command to run when the behavior is entered.
      * @return this, for chaining.
      */
-    public SmartOpponentConfig addBehavior(String behaviorName, Command behaviorCommand)
+    public SmartOpponentConfig withBehavior(String behaviorName, Command behaviorCommand)
     {
-        return addBehavior(behaviorName, behaviorCommand, false);
+        return withBehavior(behaviorName, behaviorCommand, false);
     }
 
     /**
@@ -420,7 +491,7 @@ public class SmartOpponentConfig {
      * @param scoringMap the map to add.
      * @return this, for chaining.
      */
-    public SmartOpponentConfig addScoringMap(Map<String, Map<String, Pose2d>> scoringMap)
+    public SmartOpponentConfig withScoringMap(Map<String, Map<String, Pose2d>> scoringMap)
     {
         this.scoringMap.putAll(scoringMap);
         return this;
@@ -434,7 +505,7 @@ public class SmartOpponentConfig {
      * @param pose The pose to add.
      * @return this, for chaining.
      */
-    public SmartOpponentConfig addScoringPose(String poseType, String poseName, Pose2d pose) {
+    public SmartOpponentConfig withScoringPose(String poseType, String poseName, Pose2d pose) {
         scoringMap.putIfAbsent(poseType, new HashMap<>());
         scoringMap.get(poseType).putIfAbsent(poseName, pose);
         if (scoringMap.get(poseType).get(poseName) != pose) {
@@ -521,7 +592,7 @@ public class SmartOpponentConfig {
      * @param collectingMap the map to add.
      * @return this, for chaining.
      */
-    public SmartOpponentConfig addCollectingMap(Map<String, Map<String, Pose2d>> collectingMap)
+    public SmartOpponentConfig withCollectingMap(Map<String, Map<String, Pose2d>> collectingMap)
     {
         this.collectingMap.putAll(collectingMap);
         return this;
@@ -535,7 +606,7 @@ public class SmartOpponentConfig {
      * @param pose The pose to add.
      * @return this, for chaining.
      */
-    public SmartOpponentConfig addCollectingPose(String poseType, String poseName, Pose2d pose) {
+    public SmartOpponentConfig withCollectingPose(String poseType, String poseName, Pose2d pose) {
         collectingMap.putIfAbsent(poseType, new HashMap<>());
         collectingMap.get(poseType).putIfAbsent(poseName, pose);
         if (collectingMap.get(poseType).get(poseName) != pose) {
@@ -802,6 +873,7 @@ public class SmartOpponentConfig {
                                     trackWidth,
                                     gyroSimulation,
                                     () -> new SwerveModuleSimulation(moduleSimConfig) // Force new sims from the config.
+                                    // Disable global battery draw quick fix.
                             ), initialPose));
         }
 

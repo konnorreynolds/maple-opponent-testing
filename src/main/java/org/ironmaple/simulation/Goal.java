@@ -13,6 +13,8 @@ import org.dyn4j.geometry.Rectangle;
 import org.dyn4j.geometry.Vector2;
 import org.ironmaple.simulation.gamepieces.GamePiece;
 
+import static edu.wpi.first.units.Units.Degrees;
+
 /**
  *
  *
@@ -32,7 +34,7 @@ public abstract class Goal implements SimulatedArena.Simulatable {
     public final boolean isBlue;
     protected int gamePieceCount = 0;
     protected Rotation3d pieceAngle = null;
-    protected Angle pieceAngleTolerance = Angle.ofBaseUnits(15, Units.Degrees);
+    protected Angle pieceAngleTolerance = Angle.ofBaseUnits(15, Degrees);
 
     /**
      *
@@ -113,21 +115,18 @@ public abstract class Goal implements SimulatedArena.Simulatable {
      */
     @Override
     public void simulationSubTick(int subTickNum) {
-
-        Set<GamePiece> gamePieces = new HashSet<GamePiece>(arena.getGamePiecesByType(gamePieceType));
-        Set<GamePiece> toRemove = new HashSet<>();
-
-        for (GamePiece gamePiece : gamePieces) {
-            if (gamePieceCount != max && !toRemove.contains(gamePiece) && this.checkValidity(gamePiece)) {
-                gamePieceCount++;
-                this.addPoints();
-                toRemove.add(gamePiece);
-            }
-        }
-
-        for (GamePiece gamePiece : toRemove) {
-            this.arena.removePiece(gamePiece);
-        }
+        if (gamePieceCount >= max) return;  // Early exit if already at max
+        /// Use list filtering for more efficient bulk checking.
+        // Get all pieces of our type as a list.
+        arena.getGamePiecesByType(gamePieceType).stream()
+                .filter(gamePiece -> !checkGrounded(gamePiece))
+                .filter(this::checkValidity)
+                .limit(max - gamePieceCount)  // Only score what we can
+                .forEach(gamePiece -> { // If a piece passes, score it.
+                    gamePieceCount++;
+                    this.addPoints();
+                    arena.removePiece(gamePiece);
+                });
     }
 
     /**
@@ -173,7 +172,20 @@ public abstract class Goal implements SimulatedArena.Simulatable {
      * @return Wether or not the game piece is within this goal.
      */
     protected boolean checkValidity(GamePiece gamePiece) {
-        return checkCollision(gamePiece) && checkRotation(gamePiece) && checkVel(gamePiece);
+        return checkRotation(gamePiece) & checkVel(gamePiece) & checkCollision(gamePiece);
+    }
+
+    /**
+     *
+     *
+     * <h2>Checks whether the submitted game piece is grounded </h2>
+     *
+     *
+     * @param gamePiece The game piece to have its groundedness checked.
+     * @return Whether the piece is grounded.
+     */
+    protected boolean checkGrounded(GamePiece gamePiece) {
+        return gamePiece.isGrounded();
     }
 
     /**
@@ -195,18 +207,20 @@ public abstract class Goal implements SimulatedArena.Simulatable {
             return true;
         }
 
-        return gamePiece
-                                .getPose3d()
-                                .getRotation()
-                                .minus(pieceAngle)
-                                .getMeasureAngle()
-                                .in(Units.Degrees)
-                        < pieceAngleTolerance.in(Units.Degrees)
-                || flipRotation(gamePiece.getPose3d().getRotation())
-                                .minus(pieceAngle)
-                                .getMeasureAngle()
-                                .in(Units.Degrees)
-                        < pieceAngleTolerance.in(Units.Degrees);
+        Rotation3d normalDiff = gamePiece.getPose3d().getRotation().minus(pieceAngle);
+        Rotation3d flippedDiff =
+                flipRotation(gamePiece.getPose3d().getRotation()).minus(pieceAngle);
+
+
+
+        return new Rotation3d(Degrees.of(0), normalDiff.getMeasureZ(), normalDiff.getMeasureZ())
+                .getMeasureAngle()
+                .in(Degrees)
+                < pieceAngleTolerance.in(Degrees)
+                || new Rotation3d(Degrees.of(0), flippedDiff.getMeasureZ(), flippedDiff.getMeasureZ())
+                .getMeasureAngle()
+                .in(Degrees)
+                < pieceAngleTolerance.in(Degrees);
     }
 
     /**
@@ -218,10 +232,14 @@ public abstract class Goal implements SimulatedArena.Simulatable {
      * @return Wether or not the game piece is within the goal.
      */
     protected boolean checkCollision(GamePiece gamePiece) {
-        return xyBox.contains(new Vector2(
-                        gamePiece.getPose3d().getX(), gamePiece.getPose3d().getY()))
-                && gamePiece.getPose3d().getZ() >= elevation.in(Units.Meters)
-                && gamePiece.getPose3d().getZ() <= elevation.in(Units.Meters) + height.in(Units.Meters);
+        // Call our values just once.
+        var pose = gamePiece.getPose3d();
+        double minZ = elevation.in(Units.Meters);
+        double maxZ = minZ + height.in(Units.Meters);
+
+        return xyBox.contains(new Vector2(pose.getX(), pose.getY()))
+                && pose.getZ() >= minZ
+                && pose.getZ() <= maxZ;
     }
 
     /**
