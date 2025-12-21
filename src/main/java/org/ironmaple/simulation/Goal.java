@@ -203,15 +203,12 @@ public abstract class Goal implements SimulatedArena.Simulatable {
      */
     protected boolean checkRotation(GamePiece gamePiece) {
         if (pieceAngle == null) {
-            System.out.println("test");
             return true;
         }
 
         Rotation3d normalDiff = gamePiece.getPose3d().getRotation().minus(pieceAngle);
         Rotation3d flippedDiff =
                 flipRotation(gamePiece.getPose3d().getRotation()).minus(pieceAngle);
-
-
 
         return new Rotation3d(Degrees.of(0), normalDiff.getMeasureZ(), normalDiff.getMeasureZ())
                 .getMeasureAngle()

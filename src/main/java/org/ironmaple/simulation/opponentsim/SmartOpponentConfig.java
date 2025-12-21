@@ -1124,8 +1124,8 @@ public class SmartOpponentConfig {
                             .withSquareChassis(Inches.of(32), Inches.of(24))  // 32x32 bumper, 24 track width
                             .withMass(Pounds.of(60))
                             .withMOI(KilogramSquareMeters.of(6))
-                            .withMaxLinearVelocity(MetersPerSecond.of(8.5))
-                            .withMaxAngularVelocity(RadiansPerSecond.of(Math.PI * 2))
+                            .withMaxLinearVelocity(MetersPerSecond.of(12.5))
+                            .withMaxAngularVelocity(DegreesPerSecond.of(480))
                             .withModule(ModuleConfig.Presets.MK4i.getConfig());
 
                 };
@@ -1473,7 +1473,7 @@ public class SmartOpponentConfig {
                             .withDriveFrictionVoltage(Volts.of(0.3))
                             .withSteerFrictionVoltage(Volts.of(0.2))
                             .withSteerAngularInertia(KilogramSquareMeters.of(0.03))
-                            .withMaxDriveVelocity(MetersPerSecond.of(10))
+                            .withMaxDriveVelocity(MetersPerSecond.of(17.6))
                             .withDriveCurrentLimit(Amps.of(40));
                 };
             }

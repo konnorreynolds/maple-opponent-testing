@@ -13,6 +13,7 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import frc.robot.subsystems.SwerveSubsystem;
 import org.ironmaple.simulation.SimulatedArena;
+import org.ironmaple.simulation.motorsims.SimulatedBattery;
 import org.ironmaple.simulation.seasonspecific.reefscape2025.Arena2025Reefscape;
 import org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim.KitBot;
 import yams.mechanisms.swerve.utility.SwerveInputStream;
@@ -27,7 +28,7 @@ public class RobotContainer {
   public RobotContainer()
   {
       SimulatedArena.overrideSimulationTimings(Seconds.of(0.02), 3);
-
+      SimulatedBattery.disableBatterySim();
       new KitBot("Kitbot 1", DriverStation.Alliance.Blue)
               .withXboxController(new CommandXboxController(1));
       new KitBot("Kitbot 2", DriverStation.Alliance.Red);

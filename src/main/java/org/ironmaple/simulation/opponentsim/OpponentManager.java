@@ -6,14 +6,14 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.units.measure.Distance;
+import edu.wpi.first.units.measure.Time;
 import edu.wpi.first.wpilibj.DriverStation;
 import org.ironmaple.simulation.opponentsim.pathfinding.MapleADStar;
 
 import java.util.*;
 import java.util.function.Consumer;
 
-import static edu.wpi.first.units.Units.Degrees;
-import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.*;
 
 public class OpponentManager {
     // Map of possible scoring poses and types. For example, Map<"Hoops", Map<"CourtLeft", Pose2d>>
@@ -27,8 +27,21 @@ public class OpponentManager {
     protected static final List<Pose2d> queeningPoses = new ArrayList<>();
     // Bounding box buffer, used to determine how big to make the obstacles.
     protected static Distance boundingBoxBuffer;
+    // Bounding box offset Translation2d
+    protected final Translation2d boundingBoxTranslation;
+
     /// List of all opponent robots.
     protected static final List<SmartOpponent> opponents = new ArrayList<>();
+
+    /**
+     * MapleSim Opponent currently relies on Pathplanner with a modified pathfinder.
+     * This is to be changed soon. ^TM
+     */
+    public OpponentManager()
+    {
+        boundingBoxBuffer = Meters.of(0.75);
+        boundingBoxTranslation = new Translation2d(boundingBoxBuffer, boundingBoxBuffer);
+    }
 
     /**
      * MapleSim Opponent currently relies on Pathplanner with a modified pathfinder.
@@ -42,15 +55,6 @@ public class OpponentManager {
         if (withDefaults) {
             withDefaults();
         }
-    }
-
-    /**
-     * MapleSim Opponent currently relies on Pathplanner with a modified pathfinder.
-     * This is to be changed soon. ^TM
-     */
-    public OpponentManager()
-    {
-        boundingBoxBuffer = Meters.of(0.75);
     }
 
     /**
@@ -115,7 +119,7 @@ public class OpponentManager {
     /**
      * Makes a list of opponents on the given alliance.
      *
-     * @param alliance the {@link edu.wpi.first.wpilibj.DriverStation.Alliance} to collect opponents from.
+     * @param alliance the {@link DriverStation.Alliance} to collect opponents from.
      * @return a {@link List<SmartOpponent>} of the given alliance.
      */
     public List<SmartOpponent> getOpponents(DriverStation.Alliance alliance) {
@@ -140,7 +144,7 @@ public class OpponentManager {
     /**
      * Returns only the opponent targets for the given alliance.
      *
-     * @param alliance which {@link edu.wpi.first.wpilibj.DriverStation.Alliance} targets to grab.
+     * @param alliance which {@link DriverStation.Alliance} targets to grab.
      * @return a list of poses targeted by opponents on the given alliance.
      */
     public List<Pose2d> getOpponentTargets(DriverStation.Alliance alliance) {
@@ -170,7 +174,7 @@ public class OpponentManager {
     /**
      * Returns only the opponent poses for the given alliance.
      *
-     * @param alliance which {@link edu.wpi.first.wpilibj.DriverStation.Alliance} poses to grab.
+     * @param alliance which {@link DriverStation.Alliance} poses to grab.
      * @return a list of opponent poses on the given alliance.
      */
     public List<Pose2d> getOpponentPoses(DriverStation.Alliance alliance) {
@@ -224,59 +228,6 @@ public class OpponentManager {
             initialRedPoses.remove(0);
         }
         return pose;
-    }
-
-    /**
-     * Makes a list of bounding boxes for obstacle avoidance.
-     *
-     * @param currentOpponent the current robot, used to remove self as an obstacle.
-     * @return a list of obstacles usable by {@link org.ironmaple.simulation.opponentsim.pathfinding.MapleADStar}.
-     */
-    public List<Pair<Translation2d, Translation2d>> getObstacles(SmartOpponent currentOpponent) {
-        List<Pair<Translation2d, Translation2d>> obs = new ArrayList<>(opponents.size() + 1);
-        Translation2d offset = new Translation2d(boundingBoxBuffer, boundingBoxBuffer);
-        for (SmartOpponent opponent : opponents) {
-            if (!Objects.equals(opponent, currentOpponent)) {
-                obs.add(new Pair<>(
-                        opponent.getOpponentPose().getTranslation().plus(offset),
-                        opponent.getOpponentPose().getTranslation().minus(offset)));
-            }
-        }
-        return obs;
-    }
-
-    /**
-     * Adds obstacles to the given pathfinder if the given opponent is near another opponent. </p>
-     * Used in the {@link SmartOpponent} pathfinding command.
-     *
-     * @param pathfinder the pathfinder to update.
-     * @param currentOpponent the opponent to check.
-     * @param tolerance how far from other opponents should we be.
-     *
-     * @return whether the thread was run.
-     */
-    public boolean ifNearAddObstacles(MapleADStar pathfinder, SmartOpponent currentOpponent, Consumer<Integer> pathPoseCount, Distance tolerance)
-    {
-        boolean runThread = false;
-        // Check all opponents that aren't the current opponent
-        for (SmartOpponent opponent : opponents) {
-            if (!Objects.equals(opponent, currentOpponent)) {
-                // Check if they are close to the current opponent
-                if (currentOpponent.getOpponentPose().getTranslation().getDistance(opponent.getOpponentPose().getTranslation()) < tolerance.in(Meters)) { // We don't need to be at a specific angle.
-                    // If they are, reload obstacles and end the loop
-                    pathfinder.setDynamicObstacles(getObstacles(currentOpponent), currentOpponent.getOpponentPose().getTranslation());
-                    runThread = true;
-                    break;
-                }
-            }
-        }
-        // If we should run the thread, run it.
-        if (runThread) {
-            pathfinder.runThread();
-            pathPoseCount.accept(pathfinder.currentPathPoses.size());
-        }
-        // Return if we ran the thread.
-        return runThread;
     }
 
     /**
