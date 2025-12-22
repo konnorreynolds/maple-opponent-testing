@@ -26,6 +26,7 @@ import org.ironmaple.simulation.drivesims.SelfControlledSwerveDriveSimulation;
 import org.ironmaple.simulation.opponentsim.pathfinding.MapleADStar;
 import org.ironmaple.utils.FieldMirroringUtils;
 
+import java.lang.annotation.Target;
 import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -56,7 +57,7 @@ public abstract class SmartOpponent extends SubsystemBase
     // Behavior Chooser Publisher
     protected StringPublisher selectedBehaviorPublisher;
     // Target Pose
-    protected Pose2d targetPose;
+    protected Pair<String, Pose2d> target;
     // Latest updated obstacle list
     protected final List<Pair<Translation2d, Translation2d>> latestObstacles = new ArrayList<>();
     // Obstacles are dynamically updated by the method that requires it.
@@ -287,23 +288,23 @@ public abstract class SmartOpponent extends SubsystemBase
      *
      * @return either the opponent target pose or null if there is no active target.
      */
-    public Pose2d getTargetPose()
+    public Pair<String, Pose2d> getTarget()
     {
-        return targetPose;
+        return target;
     }
 
     /**
      * Pathfinds to a target pose.
      *
-     * @param targetPose The target pose.
+     * @param target The target.
      * @return A command to pathfind to the target pose.
      */
-    protected Command pathfind(Pose2d targetPose, Time timeout) {
+    protected Command pathfind(Pair<String, Pose2d> target, Time timeout) {
         /// Determine pose data
         // Store targetPose as a global var
-        this.targetPose = ifShouldFlip(targetPose);
+        this.target = Pair.of(target.getFirst(), ifShouldFlip(target.getSecond()));
         // Add offset after setting flipped generic target.
-        final Pose2d finalPose = this.targetPose.plus(config.pathfindOffset);
+        final Pose2d finalPose = this.target.getSecond().plus(config.pathfindOffset);
         // Initialize our desiredState once.
         final PathPlannerTrajectoryState desiredState = new PathPlannerTrajectoryState();
         /// Set up the pathfinder
@@ -318,10 +319,10 @@ public abstract class SmartOpponent extends SubsystemBase
             return Commands.run(() -> {
                         /// If we are close to another opponent registered by our manager, update obstacles and recalculate our path.
                         if (manager != null) {
-                            ifNearAddObstacles(mapleADStar, this, Meters.of(1));
+                            ifNearAddObstacles(mapleADStar, this, Meters.of(1.5));
                         }
-                        Pose2d currentPose = drivetrainSim.getActualPoseInSimulationWorld();
-                        List<Waypoint> waypoints = mapleADStar.currentWaypoints;
+                        final Pose2d currentPose = drivetrainSim.getActualPoseInSimulationWorld();
+                        final List<Waypoint> waypoints = mapleADStar.currentWaypoints;
                         Pose2d currentTarget;
                         /// If waypoints exist, make the next one our target.
                         if (!waypoints.isEmpty()) {
@@ -331,8 +332,9 @@ public abstract class SmartOpponent extends SubsystemBase
                                             (double) (initialWaypointCount[0] - waypoints.size()) / initialWaypointCount[0]));
                             /// If we are close enough, remove it and move to the next waypoint.
                             if (nearPose(currentTarget,
-                                    Feet.of(1), // How close we should be to the next anchor before moving to the next anchor
-                                    Degrees.of(5))) // How correct our angle should be before moving to the next anchor
+                                    Meters.of(1), // How close we should be to the next anchor before moving to the next anchor
+                                    Degrees.of(180))) // How correct our angle should be before moving to the next anchor
+                                    // We don't need to force any angle here for swerve, it l
                             {
                                 waypoints.remove(0);
                             }
@@ -342,7 +344,9 @@ public abstract class SmartOpponent extends SubsystemBase
                         }
                         /// Create a new desired state
                         desiredState.pose = currentTarget;
+                        desiredState.heading = currentTarget.getRotation();
                         /// Calculate our chassis speeds.
+                        driveController.reset(drivetrainSim.getActualPoseInSimulationWorld(), drivetrainSim.getActualSpeedsFieldRelative());
                         ChassisSpeeds speeds = driveController.calculateRobotRelativeSpeeds(
                                 currentPose,
                                 desiredState);
@@ -354,7 +358,7 @@ public abstract class SmartOpponent extends SubsystemBase
                     }) /// Finally, stop the chassis and clear our target.
                     .finallyDo(() -> {
                         drivetrainSim.runChassisSpeeds(new ChassisSpeeds(), new Translation2d(), false, false);
-                        this.targetPose = Pose2d.kZero;
+                        this.target = Pair.of("", Pose2d.kZero);
                     }) /// Set a timeout, usually 7 sec is good.,
                     .withTimeout(timeout);
                     },
@@ -443,7 +447,7 @@ public abstract class SmartOpponent extends SubsystemBase
                 });
         // If we should run the thread, run it.
         if (runThread[0] == 1) {
-            pathfinder.setStartPosition(getOpponentPose().getTranslation());
+            pathfinder.setStartPosition(currentTranslation);
             pathfinder.runThread();
         }
         // Return if we ran the thread.
@@ -457,12 +461,26 @@ public abstract class SmartOpponent extends SubsystemBase
      * @param poseMap The map to get a pose from.
      * @return A random pose from the map.
      */
-    protected Pose2d getRandomFromMap(Map<String, Pose2d> poseMap) {
-        if (poseMap.isEmpty()) {
-            DriverStation.reportError("Pose map is empty!!!", true);
-            return null;
-        }
-        return poseMap.values().toArray(new Pose2d[0])[new Random().nextInt(poseMap.size())];
+    protected Pair<String, Pose2d> getRandomFromMap(Map<String, Pose2d> poseMap) {
+        Map.Entry<String, Pose2d> randomEntry = poseMap.entrySet().stream()
+                .skip(new Random().nextInt(poseMap.size()))
+                .findFirst()
+                .orElse(null);
+
+        return randomEntry != null ? Pair.of(randomEntry.getKey(), randomEntry.getValue()) : null;
+    }
+
+    /**
+     * Gets a random pose from a map.TODO
+     * If the map is empty reports an error and returns null.
+     *
+     * @param poseMap The map to get a pose from.
+     * @return A random pose from the map.
+     */
+    protected Pair<String, Pose2d> getTargetFromMap(Map<String, Pose2d> poseMap) {
+        final Map<String, Pose2d> newMap = new HashMap<>(poseMap);
+        newMap.values().removeAll(manager.getOpponentTargets());
+        return  getRandomFromMap(newMap);
     }
 
     /**

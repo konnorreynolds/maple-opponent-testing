@@ -269,7 +269,6 @@ public class MapleADStar implements Pathfinder {
             Translation2d realStart = requestRealStartPos;
             GridPosition goal = requestGoal;
             Translation2d realGoal = requestRealGoalPos;
-            Set<GridPosition> obstacles = requestObstacles;
 
             // Change the request booleans based on what will be done this loop
             if (reset) {
@@ -284,7 +283,7 @@ public class MapleADStar implements Pathfinder {
             requestLock.readLock().unlock();
 
             if (reset || minor || major) {
-                doWork(reset, minor, major, start, goal, realStart, realGoal, obstacles);
+                doWork(reset, minor, major, start, goal, realStart, realGoal, requestObstacles);
             }
 //            else {
 //                try {

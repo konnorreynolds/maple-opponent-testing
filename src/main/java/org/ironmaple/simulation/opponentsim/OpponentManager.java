@@ -39,7 +39,7 @@ public class OpponentManager {
      */
     public OpponentManager()
     {
-        boundingBoxBuffer = Meters.of(0.75);
+        boundingBoxBuffer = Meters.of(0.6);
         boundingBoxTranslation = new Translation2d(boundingBoxBuffer, boundingBoxBuffer);
     }
 
@@ -147,11 +147,11 @@ public class OpponentManager {
      * @param alliance which {@link DriverStation.Alliance} targets to grab.
      * @return a list of poses targeted by opponents on the given alliance.
      */
-    public List<Pose2d> getOpponentTargets(DriverStation.Alliance alliance) {
-        List<Pose2d> targets = new ArrayList<>();
+    public List<Pair<String, Pose2d>> getOpponentTargets(DriverStation.Alliance alliance) {
+        List<Pair<String, Pose2d>> targets = new ArrayList<>();
         for (SmartOpponent opponent : opponents) {
             if (opponent.config.alliance == alliance) {
-                targets.add(opponent.getTargetPose());
+                targets.add(opponent.getTarget());
             }
         }
         return targets;
@@ -162,11 +162,11 @@ public class OpponentManager {
      *
      * @return a list of all poses targeted by opponents on the given alliance.
      */
-    public List<Pose2d> getOpponentTargets() {
+    public List<Pair<String, Pose2d>> getOpponentTargets() {
         List<SmartOpponent> allOpponents = getOpponents();
-        List<Pose2d> targets = new ArrayList<>();
+        List<Pair<String, Pose2d>> targets = new ArrayList<>();
         for (SmartOpponent opponent : allOpponents) {
-            targets.add(opponent.getTargetPose());
+            targets.add(opponent.getTarget());
         }
         return targets;
     }

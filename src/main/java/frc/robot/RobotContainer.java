@@ -16,6 +16,7 @@ import org.ironmaple.simulation.SimulatedArena;
 import org.ironmaple.simulation.motorsims.SimulatedBattery;
 import org.ironmaple.simulation.seasonspecific.reefscape2025.Arena2025Reefscape;
 import org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim.KitBot;
+import org.ironmaple.simulation.seasonspecific.reefscape2025.opponentsim.SuperKitBot;
 import yams.mechanisms.swerve.utility.SwerveInputStream;
 
 import static edu.wpi.first.units.Units.Seconds;
@@ -29,13 +30,13 @@ public class RobotContainer {
   {
       SimulatedArena.overrideSimulationTimings(Seconds.of(0.02), 3);
       SimulatedBattery.disableBatterySim();
-      new KitBot("Kitbot 1", DriverStation.Alliance.Blue)
+      new SuperKitBot("Kitbot 1", DriverStation.Alliance.Blue)
               .withXboxController(new CommandXboxController(1));
-      new KitBot("Kitbot 2", DriverStation.Alliance.Red);
-      new KitBot("Kitbot 3", DriverStation.Alliance.Blue);
-      new KitBot("Kitbot 4", DriverStation.Alliance.Red);
-      new KitBot("Kitbot 5", DriverStation.Alliance.Blue);
-      new KitBot("Kitbot 6", DriverStation.Alliance.Red);
+      new SuperKitBot("Kitbot 2", DriverStation.Alliance.Red);
+      new SuperKitBot("Kitbot 3", DriverStation.Alliance.Blue);
+      new SuperKitBot("Kitbot 4", DriverStation.Alliance.Red);
+      new SuperKitBot("Kitbot 5", DriverStation.Alliance.Blue);
+      new SuperKitBot("Kitbot 6", DriverStation.Alliance.Red);
       configureBindings();
   }
 

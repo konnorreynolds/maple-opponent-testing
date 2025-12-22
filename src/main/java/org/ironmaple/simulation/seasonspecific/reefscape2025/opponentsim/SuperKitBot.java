@@ -12,19 +12,24 @@ import org.ironmaple.simulation.IntakeSimulation;
 import org.ironmaple.simulation.opponentsim.SmartOpponent;
 import org.ironmaple.simulation.opponentsim.SmartOpponentConfig;
 import org.ironmaple.simulation.seasonspecific.reefscape2025.Arena2025Reefscape;
+import org.ironmaple.simulation.seasonspecific.reefscape2025.ReefscapeAlgaeOnFly;
 import org.ironmaple.simulation.seasonspecific.reefscape2025.ReefscapeCoralOnFly;
 
-import static edu.wpi.first.units.Units.*;
+import java.util.Objects;
 
-public class KitBot extends SmartOpponent {
-    public KitBot(String name, DriverStation.Alliance alliance) {
+import static edu.wpi.first.units.Units.*;
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+import static edu.wpi.first.units.Units.Seconds;
+
+public class SuperKitBot extends SmartOpponent {
+    public SuperKitBot(String name, DriverStation.Alliance alliance) {
         /// All Options should be set in the constructor.
         super(new SmartOpponentConfig()
                 .withName(name)
                 .withAlliance(alliance)
                 .withManager(Arena2025Reefscape.getInstance().getOpponentManager())
                 .withChassisConfig(SmartOpponentConfig.ChassisConfig.Presets.SimpleSquareChassis.getConfig())
-                .removeScoringPoseType("Barge")
                 .withAutoEnable());
         /// Adds a separate subsystem thread for the manipulator, this allows better manual control support.
         this.manipulatorSim
@@ -47,7 +52,16 @@ public class KitBot extends SmartOpponent {
                                         .rotateBy(Rotation2d.kCCW_90deg), // Rotated by 90 degrees for horizontal shooter.
                                 Inches.of(30), // Shooter Height
                                 MetersPerSecond.of(0), // Initial piece speed
-                                Degrees.of(0))); // Shooter angle
+                                Degrees.of(0))) // Shooter angle
+                .addProjectileSimulation("Algae",
+                        () -> new ReefscapeAlgaeOnFly(
+                        drivetrainSim.getActualPoseInSimulationWorld().getTranslation(), // Opponent Pose
+                        new Translation2d(Inches.of(0), Inches.of(-18)), // Pose on bot
+                        drivetrainSim.getActualSpeedsRobotRelative(), // Robot Relative opponent speeds
+                        drivetrainSim.getActualPoseInSimulationWorld().getRotation(), // Shooter heading
+                        Meters.of(2.5), // Shooter Height
+                        MetersPerSecond.of(2), // Shooter speed
+                        Degrees.of(20))); // Shooter angle
     }
 
     /**
@@ -72,20 +86,27 @@ public class KitBot extends SmartOpponent {
     protected Command scoreState() {
         return pathfind(getTargetFromMap(config.getScoringMap()), Seconds.of(10))
                 .andThen(Commands.waitSeconds(0.2))
-                .andThen(manipulatorSim.score("Coral"))
+                .andThen(isCoralTarget()
+                        ? manipulatorSim.score("Coral")
+                        : manipulatorSim.score("Algae"))
                 .andThen(Commands.waitSeconds(0.5))
                 .finallyDo(() -> setState("Collect"))
                 .withTimeout(13);
     }
 
-    public KitBot withXboxController(CommandXboxController xboxController) {
+    private boolean isCoralTarget() {
+        return !Objects.equals(target.getFirst(), "Barge");
+    }
+
+    public SuperKitBot withXboxController(CommandXboxController xboxController) {
         config.withJoystick(xboxController);
         config.withState("Joystick", this::joystickState);
         config.withBehavior("Player", startingState("Joystick").andThen(startingState("Joystick").ignoringDisable(true)));
         config.updateBehaviorChooser();
         /// Enable Manipulator control
         xboxController.leftBumper().and(config.isStateTrigger("Joystick")).whileTrue(manipulatorSim.intake("Intake"));
-        xboxController.rightBumper().and(config.isStateTrigger("Joystick")).whileTrue(manipulatorSim.score("Coral"));
+        xboxController.rightBumper().and(config.isStateTrigger("Joystick")).onTrue(manipulatorSim.score("Coral"));
+        xboxController.a().and(config.isStateTrigger("Joystick")).onTrue(manipulatorSim.score("Algae"));
         return this;
     }
 
@@ -102,6 +123,6 @@ public class KitBot extends SmartOpponent {
                                 MathUtil.applyDeadband(xbox.getLeftY() * -config.chassis.maxLinearVelocity.in(MetersPerSecond), config.joystickdeadband),
                                 MathUtil.applyDeadband(xbox.getLeftX() * -config.chassis.maxLinearVelocity.in(MetersPerSecond), config.joystickdeadband),
                                 MathUtil.applyDeadband(xbox.getRightX() * -config.chassis.maxAngularVelocity.in(RadiansPerSecond), config.joystickdeadband)),
-                        false);
+                false);
     }
 }
