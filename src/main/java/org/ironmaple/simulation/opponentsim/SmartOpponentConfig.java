@@ -723,6 +723,7 @@ public class SmartOpponentConfig {
         InitialPose
     }
 
+// TODO
     public static class ChassisConfig
     {
         /// Required chassis options to be set later.
@@ -1101,6 +1102,7 @@ public class SmartOpponentConfig {
             ModuleConfig
         }
 
+// TODO
         public enum Presets
         {
             /// <p> Opponent Swerve Chassis config presets to ease creation. </p>
@@ -1132,6 +1134,7 @@ public class SmartOpponentConfig {
             }
         }
 
+// TODO
         public ChassisConfig copy(ChassisConfig other) {
             this
                     .withTrackWidth(other.trackWidth)
@@ -1149,6 +1152,7 @@ public class SmartOpponentConfig {
         public static ChassisConfig clone(ChassisConfig other) {return new ChassisConfig().copy(other);}
     }
 
+// TODO
     public static class ModuleConfig
     {
         /// Constants to be initialized in the constructor.
@@ -1441,6 +1445,7 @@ public class SmartOpponentConfig {
             DriveCurrentLimit
         }
 
+// TODO add comment
         public enum Presets
         {
             /// <p> Opponent Swerve module config presets to ease creation. </p>
