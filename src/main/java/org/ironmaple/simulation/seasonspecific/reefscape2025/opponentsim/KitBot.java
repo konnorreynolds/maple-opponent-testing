@@ -17,6 +17,7 @@ import org.ironmaple.simulation.seasonspecific.reefscape2025.ReefscapeCoralOnFly
 import static edu.wpi.first.units.Units.*;
 
 public class KitBot extends SmartOpponent {
+// TODO
     public KitBot(String name, DriverStation.Alliance alliance) {
         /// All Options should be set in the constructor.
         super(new SmartOpponentConfig()
@@ -27,6 +28,7 @@ public class KitBot extends SmartOpponent {
                 .removeScoringPoseType("Barge")
                 .withAutoEnable());
         /// Adds a separate subsystem thread for the manipulator, this allows better manual control support.
+// TODO add better commenting
         this.manipulatorSim
                 .addIntakeSimulation("Intake",
                         IntakeSimulation.InTheFrameIntake(
@@ -78,6 +80,7 @@ public class KitBot extends SmartOpponent {
                 .withTimeout(13);
     }
 
+// TODO
     public KitBot withXboxController(CommandXboxController xboxController) {
         config.withJoystick(xboxController);
         config.withState("Joystick", this::joystickState);
