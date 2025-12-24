@@ -10,7 +10,7 @@ import org.ironmaple.simulation.gamepieces.GamePieceProjectile;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Supplier;
-
+// TODO
 public class OpponentManipulatorSim extends SubsystemBase {
     /// Simulation Maps of saved manipulators
     private final Map<String, IntakeSimulation> intakeSimulations;
@@ -140,6 +140,7 @@ public class OpponentManipulatorSim extends SubsystemBase {
      */
     public Command scoreWithIntake(String intakeName, String projectileName)
     {
+// TODO fix
         return runOnce(() -> {
             if (getIntakeSimulation(intakeName).getGamePiecesAmount() > 0)
             {
