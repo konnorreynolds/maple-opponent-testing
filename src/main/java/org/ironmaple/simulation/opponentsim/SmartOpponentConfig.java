@@ -19,6 +19,7 @@ import java.util.function.Supplier;
 
 import static edu.wpi.first.units.Units.*;
 
+// TODO
 public class SmartOpponentConfig {
     /// Basic Required Options
     public String name;
@@ -447,6 +448,7 @@ public class SmartOpponentConfig {
      */
     public SendableChooser<Command> updateBehaviorChooser()
     {
+// TODO replace for loop?
         boolean hasDefault = false;
         /// Load all behaviours
         for (Map.Entry<String, Pair<Command, Boolean>> entry : behavior.entrySet()) {
@@ -695,6 +697,7 @@ public class SmartOpponentConfig {
      */
     public boolean validateConfigs()
     {
+// TODO replace for?
         boolean validConfig = chassis.validConfig() && requiredBasicOptions.isEmpty();
         // If not set correct, report settings to update. Then throw an error.
         if (!validConfig) {
@@ -899,6 +902,7 @@ public class SmartOpponentConfig {
          * @return true if the config is valid, false otherwise.
          */
         public boolean validConfig() {
+// TODO use streaming?
             boolean validConfig = module.validConfig() && requiredChassisOptions.isEmpty();
             if (!validConfig) {
                 for (ChassisOptions option : requiredChassisOptions) {
@@ -1149,6 +1153,7 @@ public class SmartOpponentConfig {
             return this;
         }
 
+// TODO 
         public static ChassisConfig clone(ChassisConfig other) {return new ChassisConfig().copy(other);}
     }
 
