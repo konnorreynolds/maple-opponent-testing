@@ -32,7 +32,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import static edu.wpi.first.units.Units.*;
-
+// TODO
 public abstract class SmartOpponent extends SubsystemBase
 {
     /// Publishers
@@ -191,7 +191,7 @@ public abstract class SmartOpponent extends SubsystemBase
      * @return a runnable that runs the state.
      */
     abstract protected Command collectState();
-
+// TODO update state command commenting
     /**
      * <p>The score state to run.</p>
      *
