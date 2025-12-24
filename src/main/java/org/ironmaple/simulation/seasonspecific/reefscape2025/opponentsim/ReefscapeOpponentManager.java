@@ -7,6 +7,7 @@ import edu.wpi.first.math.util.Units;
 import org.ironmaple.simulation.opponentsim.OpponentManager;
 
 public class ReefscapeOpponentManager extends OpponentManager {
+// TODO add better pose addition commenting
     public ReefscapeOpponentManager()
     {
         super(true);
