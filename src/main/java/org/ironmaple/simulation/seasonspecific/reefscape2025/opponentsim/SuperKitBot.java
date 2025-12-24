@@ -23,6 +23,7 @@ import static edu.wpi.first.units.Units.RadiansPerSecond;
 import static edu.wpi.first.units.Units.Seconds;
 
 public class SuperKitBot extends SmartOpponent {
+// TODO add commenr
     public SuperKitBot(String name, DriverStation.Alliance alliance) {
         /// All Options should be set in the constructor.
         super(new SmartOpponentConfig()
@@ -33,6 +34,7 @@ public class SuperKitBot extends SmartOpponent {
                 .withAutoEnable());
         /// Adds a separate subsystem thread for the manipulator, this allows better manual control support.
         this.manipulatorSim
+// TODO This is an example add comments to these functions
                 .addIntakeSimulation("Intake",
                         IntakeSimulation.InTheFrameIntake(
                                 "Coral",
@@ -94,10 +96,12 @@ public class SuperKitBot extends SmartOpponent {
                 .withTimeout(13);
     }
 
+// TODO 
     private boolean isCoralTarget() {
         return !Objects.equals(target.getFirst(), "Barge");
     }
 
+// TODO
     public SuperKitBot withXboxController(CommandXboxController xboxController) {
         config.withJoystick(xboxController);
         config.withState("Joystick", this::joystickState);
