@@ -14,7 +14,7 @@ import java.util.*;
 import java.util.function.Consumer;
 
 import static edu.wpi.first.units.Units.*;
-
+// TODO
 public class OpponentManager {
     // Map of possible scoring poses and types. For example, Map<"Hoops", Map<"CourtLeft", Pose2d>>
     protected static final Map<String, Map<String, Pose2d>> scoringMap = new HashMap<>();
